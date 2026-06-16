@@ -99,7 +99,7 @@ export const loader = async ({ params, request }: LoaderArgs) => {
   const rawExtra = await db.$queryRaw<{
     discountType: string; fixedDiscountCents: number | null;
     fixedPriceCents: number | null; priceDisplay: string;
-  }[]>`SELECT discountType, fixedDiscountCents, fixedPriceCents, priceDisplay FROM "Catalog" WHERE id = ${catalogId}`;
+  }[]>`SELECT "discountType", "fixedDiscountCents", "fixedPriceCents", "priceDisplay" FROM "Catalog" WHERE id = ${catalogId}`;
   const extra = rawExtra[0] ?? { discountType: "PERCENT", fixedDiscountCents: null, fixedPriceCents: null, priceDisplay: "REPLACED" };
 
   return json({
