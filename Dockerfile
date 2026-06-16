@@ -1,15 +1,15 @@
-FROM node:24-alpine
+FROM node:20-alpine
 
 # Install openssl for Prisma
 RUN apk add --no-cache openssl
 
 WORKDIR /app
 
-# Install ALL deps (including devDependencies needed for build)
+# Install ALL deps
 COPY package.json package-lock.json* ./
 RUN npm ci
 
-# Copy source code
+# Copy source
 COPY . .
 
 # Generate Prisma client
@@ -22,10 +22,10 @@ ENV NODE_OPTIONS="--max-old-space-size=4096"
 # Build the application
 RUN npm run build
 
-# Remove devDependencies after build to shrink image
+# Remove devDependencies after build
 RUN npm prune --omit=dev && npm cache clean --force
 
 EXPOSE 3000
+EXPOSE 5555  # Add this for Prisma Studio
 
-# Start the application with database setup
 CMD ["npm", "run", "docker-start"]
