@@ -16,7 +16,7 @@ import db from "./db.server";
 import { catalogVersionCache } from "./cache.server";
 
 export async function invalidateCatalogCache(catalogId: number): Promise<void> {
-  await db.$executeRaw`UPDATE "Catalog" SET cacheVersion = cacheVersion + 1 WHERE id = ${catalogId}`;
+  await db.$executeRaw`UPDATE "Catalog" SET "cacheVersion" = "cacheVersion" + 1 WHERE id = ${catalogId}`;
   catalogVersionCache.del(`cv:${catalogId}`);
 }
 
@@ -24,7 +24,7 @@ export async function invalidateCatalogCacheMany(catalogIds: number[]): Promise<
   if (!catalogIds.length) return;
   await Promise.all(
     catalogIds.map((id) =>
-      db.$executeRaw`UPDATE "Catalog" SET cacheVersion = cacheVersion + 1 WHERE id = ${id}`,
+      db.$executeRaw`UPDATE "Catalog" SET "cacheVersion" = "cacheVersion" + 1 WHERE id = ${id}`,
     ),
   );
   for (const id of catalogIds) catalogVersionCache.del(`cv:${id}`);
