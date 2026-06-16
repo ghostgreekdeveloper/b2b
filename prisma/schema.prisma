@@ -1,0 +1,236 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Form {
+  id                     Int       @id @default(autoincrement())
+  shopDomain             String    @default("") @unique
+  status                 Boolean   @default(true)
+  minimumOrderCents      Int?
+  // Form builder
+  formFields             String    @default("[]")
+  urlHandle              String    @default("register-wholesale")
+  ctaButtonText          String    @default("Submit Application")
+  approvalMode           String    @default("MANUAL")
+  autoTag                String    @default("")
+  autoExemptTax          Boolean   @default(false)
+  formName               String    @default("Wholesale Registration Form")
+  submissionMessage      String    @default("Your application has been submitted!")
+  // Status page messages
+  pendingTitle           String    @default("Application Under Review")
+  pendingMessage         String    @default("We've received your application and our team will review it shortly. We'll be in touch soon!")
+  acceptedTitle          String    @default("Wholesale Account Active")
+  acceptedMessage        String    @default("Your wholesale account is approved and active. Enjoy your exclusive pricing and access!")
+  rejectedTitle          String    @default("Application Not Approved")
+  rejectedMessage        String    @default("Unfortunately your application wasn't approved at this time. Please contact us if you have any questions.")
+  loginTitle             String    @default("Login Required")
+  loginMessage           String    @default("Please log in to your account to submit a wholesale application.")
+  // Appearance
+  formWidth              Int       @default(600)
+  fontSize               Int       @default(14)
+  fontWeight             String    @default("Medium")
+  headingColor           String    @default("#303030")
+  labelColor             String    @default("#303030")
+  inputFieldColor        String    @default("#303030")
+  primaryButtonColor     String    @default("#303030")
+  secondaryButtonColor   String    @default("#FFFFFF")
+  backgroundColor        String    @default("#FFFFFF")
+  shopifyPageId          String?
+  // Email notifications (Resend) — key stored AES-256-CBC encrypted
+  resendApiKey           String?
+  adminNotificationEmail String?
+  // Usage tracking — resets each calendar month
+  emailsSentMonth        Int       @default(0)
+  emailsMonthKey         String    @default("")
+  // Email branding (shared across all templates)
+  emailFromName          String    @default("B2B Wholesale")
+  emailFromAddress       String    @default("")
+  emailAccentColor       String    @default("#303030")
+  // Template: admin notification (new application)
+  emailAdminSubject      String    @default("New wholesale application")
+  // Template: customer → application received (pending)
+  emailPendingEnabled    Boolean   @default(false)
+  emailPendingSubject    String    @default("We received your application")
+  emailPendingBody       String    @default("Thank you for applying! Our team will review your application and get back to you shortly.")
+  // Template: customer → approved
+  emailApprovedSubject   String    @default("Your wholesale application has been approved")
+  emailApprovedBody      String    @default("Congratulations! Your wholesale account is now active. You can now log in and access your exclusive wholesale pricing.")
+  // Template: customer → rejected
+  emailRejectedSubject   String    @default("Update on your wholesale application")
+  emailRejectedBody      String    @default("Thank you for your interest in our wholesale program. Unfortunately, we’re unable to approve your application at this time. Please don’t hesitate to contact us if you have any questions.")
+  // Email template blocks (JSON — replaces text-only fields when non-empty)
+  emailAdminBlocks    String @default("[]")
+  emailPendingBlocks  String @default("[]")
+  emailApprovedBlocks String @default("[]")
+  emailRejectedBlocks String @default("[]")
+}
+
+model Catalog {
+  id                     Int       @id @default(autoincrement())
+  shopDomain             String
+  title                  String    @unique
+  tag                    String
+  status                 String    @default("active")
+  segmentId              String?
+  defaultDiscountPercent Float?
+  discountTitle          String?
+  minimumOrderMessage    String?
+  autoIncludeProducts    Boolean   @default(true)
+  // Pricing rules (discountType is locked after creation)
+  discountType           String    @default("PERCENT")
+  fixedDiscountCents     Int?
+  fixedPriceCents        Int?
+  // Price display for non-wholesale customers/segments
+  priceDisplay           String    @default("REPLACED")
+  // Monotonically increasing version — bumped on every data change.
+  // Cache keys include this version so invalidation orphans old entries
+  // rather than deleting them, preventing stale-data race conditions.
+  cacheVersion           Int       @default(1)
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+  items                  CatalogItem[]
+  customers              Customers[]
+}
+
+model CatalogItem {
+  id                    Int      @id @default(autoincrement())
+  catalogId             Int
+  productId             String
+  variantId             String?
+  name                  String?
+  sku                   String?
+  img                   String?
+  customPriceCents      BigInt?
+  customDiscountPercent BigInt?
+  catalog               Catalog  @relation(fields: [catalogId], references: [id])
+
+  @@index([catalogId])
+  @@index([catalogId, variantId])
+}
+
+model Segment {
+  id                 String      @id @default(cuid())
+  shopDomain         String      @default("")
+  title              String
+  customercondition  String
+  catalog            String?
+  status             String      @default("Draft")
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+  items              SegmentItem[]
+  shopifySegmentId   String?
+
+  @@index([shopDomain])
+  @@map("segments")
+}
+
+model SegmentItem {
+  id         String   @id @default(cuid())
+  segmentId  String
+  productId  String
+  variantId  String?
+  priceCents BigInt?
+  discount   Float?
+
+  segment    Segment  @relation(fields: [segmentId], references: [id])
+
+  @@map("segment_items")
+}
+
+model VariantPrice {
+  variantId          BigInt  @id
+  shopDomain         String
+  productId          String
+  sku                String?
+  priceCents         Int
+  compareAtPriceCents Int?
+  updatedAt          DateTime @default(now()) @updatedAt
+}
+
+enum ApplicationStatus {
+  PENDING
+  REJECTED
+  ACCEPTED
+}
+
+model Customers {
+  id                String            @id
+  shopDomain        String            @default("")
+  firstName         String?
+  lastName          String?
+  email             String?
+  applicationDate   DateTime?
+  businessName      String?
+  taxId             String?
+  applicationStatus ApplicationStatus @default(PENDING)
+
+  // Assigned catalog — set when admin approves the customer (no Shopify writes needed)
+  catalogId         Int?
+  catalog           Catalog?          @relation(fields: [catalogId], references: [id])
+
+  phone              String?
+  shippingAddressId  Int?
+  billingAddressId   Int?
+  minimumOrderCents  Int?
+  formResponses      String    @default("{}")
+
+  shippingAddress   Address? @relation("ShippingAddress", fields: [shippingAddressId], references: [id])
+  billingAddress    Address? @relation("BillingAddress", fields: [billingAddressId], references: [id])
+
+  @@index([shopDomain, catalogId, applicationStatus])
+  @@index([shopDomain, applicationStatus])
+}
+
+model Address {
+  id        Int     @id @default(autoincrement())
+  street    String?
+  address2  String?
+  city      String
+  province  String?
+  zip       String
+  country   String
+
+  shippingFor Customers[] @relation("ShippingAddress")
+  billingFor  Customers[] @relation("BillingAddress")
+}
+
+model CustomerCatalog {
+  customerId String
+  catalogId  Int
+  @@id([customerId, catalogId])
+  @@map("customer_catalogs")
+}
+
+model WebhookEvent {
+  id          Int      @id @default(autoincrement())
+  webhookId   String   @unique
+  shop        String
+  topic       String
+  processedAt DateTime @default(now())
+
+  @@index([shop])
+  @@index([processedAt])
+}
+
+model Session {
+  id            String    @id
+  shop          String
+  state         String
+  isOnline      Boolean   @default(false)
+  scope         String?
+  expires       DateTime?
+  accessToken   String
+  userId        BigInt?
+  firstName     String?
+  lastName      String?
+  email         String?
+  accountOwner  Boolean   @default(false)
+  locale        String?
+  collaborator  Boolean?  @default(false)
+  emailVerified Boolean?  @default(false)
+}

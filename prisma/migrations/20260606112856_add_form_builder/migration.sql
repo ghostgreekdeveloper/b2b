@@ -1,0 +1,2 @@
+-- All columns added in this migration are already included in the baseline migration above.
+-- This file is intentionally empty to keep migration history intact.

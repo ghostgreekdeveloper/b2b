@@ -1,0 +1,26 @@
+# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
+
+client_id = "3fcc18d975522ff69a214a94a82bf719"
+name = "syncio"
+application_url = "https://canvas-titanium-absolutely-knight.trycloudflare.com"
+embedded = true
+
+[webhooks]
+api_version = "2026-01"
+
+[access_scopes]
+# Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
+scopes = "write_validations,read_validations,write_customers,read_customers,read_discounts,write_discounts,read_product_feeds,write_product_feeds,read_product_listings,write_product_listings,read_products,write_products,write_content,read_content,unauthenticated_read_product_pickup_locations,unauthenticated_read_product_inventory,unauthenticated_read_product_listings,unauthenticated_read_product_tags"
+optional_scopes = [ ]
+use_legacy_install_flow = false
+
+[auth]
+redirect_urls = [ "https://example.com/api/auth" ]
+
+[app_proxy]
+url = "https://canvas-titanium-absolutely-knight.trycloudflare.com/proxy"
+subpath = "b2b-wholesale"
+prefix = "a"
+
+[build]
+automatically_update_urls_on_dev = true

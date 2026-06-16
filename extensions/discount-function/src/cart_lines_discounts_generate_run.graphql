@@ -1,0 +1,26 @@
+query CartInput {
+  cart {
+    buyerIdentity {
+      customer {
+        discountData: metafield(namespace: "b2b_wholesale", key: "discount_data") {
+          value
+        }
+      }
+    }
+    lines {
+      id
+      quantity
+      merchandise {
+        __typename
+        ... on ProductVariant {
+          id
+        }
+      }
+      cost {
+        amountPerQuantity {
+          amount
+        }
+      }
+    }
+  }
+}

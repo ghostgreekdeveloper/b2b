@@ -1,0 +1,87 @@
+<div
+  id="b2b-wholesale-root"
+  data-customer-id="{{ customer.id }}"
+  data-currency="{{ shop.currency }}"
+  data-theme="{{ block.settings.theme }}"
+  data-price-root="{{ block.settings.custom_price_root | default: '' }}"
+  data-regular-sel="{{ block.settings.custom_regular_sel | default: '' }}"
+  data-sale-sel="{{ block.settings.custom_sale_sel | default: '' }}"
+  data-amount-sel="{{ block.settings.custom_amount_sel | default: '' }}"
+  data-compare-sel="{{ block.settings.custom_compare_sel | default: '' }}"
+  data-hidden-class="{{ block.settings.custom_hidden_class | default: '' }}"
+  style="display:none"
+></div>
+<script src="{{ 'wholesale-prices.js' | asset_url }}" defer></script>
+
+{% schema %}
+{
+  "name": "B2B Wholesale Prices",
+  "target": "body",
+  "settings": [
+    {
+      "type": "select",
+      "id": "theme",
+      "label": "Your theme",
+      "default": "dawn",
+      "options": [
+        { "value": "dawn",      "label": "Dawn / Craft / Refresh / Sense (Free)" },
+        { "value": "debut",     "label": "Debut / Brooklyn / Minimal (Legacy)" },
+        { "value": "impulse",   "label": "Impulse / Impact / Motion (Archetype)" },
+        { "value": "turbo",     "label": "Turbo / Flex / Expanse (Out of Sandbox)" },
+        { "value": "prestige",  "label": "Prestige (Maestrooo)" },
+        { "value": "broadcast", "label": "Broadcast (Invisible Themes)" },
+        { "value": "pipeline",  "label": "Pipeline / Startup / Venue (Pixel Union)" },
+        { "value": "debutify",  "label": "Debutify / Shoptimized / eComposer" },
+        { "value": "custom",    "label": "Custom — fill in selectors below" }
+      ]
+    },
+    {
+      "type": "header",
+      "content": "Custom theme selectors",
+      "info": "Only used when 'Custom / Other' is selected above. Inspect your theme's price HTML to find the right values."
+    },
+    {
+      "type": "text",
+      "id": "custom_price_root",
+      "label": "Price root selector",
+      "default": "product-price",
+      "info": "CSS selector that matches the price wrapper for each product (one per product card). Examples: product-price, .price, .product__price"
+    },
+    {
+      "type": "text",
+      "id": "custom_regular_sel",
+      "label": "Regular price section",
+      "default": ".price__regular",
+      "info": "Container that holds the regular (non-sale) price. Leave blank if your theme has no separate section."
+    },
+    {
+      "type": "text",
+      "id": "custom_sale_sel",
+      "label": "Sale price section",
+      "default": ".price__sale",
+      "info": "Container that holds the sale/discounted price. Leave blank if no separate section."
+    },
+    {
+      "type": "text",
+      "id": "custom_amount_sel",
+      "label": "Price amount element",
+      "default": ".price-item--regular",
+      "info": "The specific element whose text content is the price number."
+    },
+    {
+      "type": "text",
+      "id": "custom_compare_sel",
+      "label": "Compare-at (strikethrough) element",
+      "default": ".compare-at-price",
+      "info": "Element that shows the original/compare-at price. For ORIGINAL_AND_DISCOUNTED mode."
+    },
+    {
+      "type": "text",
+      "id": "custom_hidden_class",
+      "label": "Hidden CSS class",
+      "default": "price__hidden",
+      "info": "CSS class that visually hides an element in your theme. Leave blank to use display:none."
+    }
+  ]
+}
+{% endschema %}

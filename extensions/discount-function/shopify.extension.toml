@@ -1,0 +1,28 @@
+api_version = "2026-01"
+
+[[extensions]]
+name = "t:name"
+handle = "function-discount-wholesale"
+type = "function"
+uid = "630829f6-2180-df6b-6a08-656aa871d3f31c3e344a"
+description = "t:description"
+
+  # Fetch phase: calls our server with customer ID to get their discount rules from DB
+  [[extensions.targeting]]
+  target = "cart.lines.discounts.generate.fetch"
+  input_query = "src/cart_lines_discounts_generate_fetch.graphql"
+  export = "cart-lines-discounts-generate-fetch"
+
+  # Run phase: reads the server response and applies discounts
+  [[extensions.targeting]]
+  target = "cart.lines.discounts.generate.run"
+  input_query = "src/cart_lines_discounts_generate_run.graphql"
+  export = "cart-lines-discounts-generate-run"
+
+  [extensions.build]
+  command = ""
+  path = "dist/function.wasm"
+
+  [[extensions.metafields]]
+  namespace = "b2b_wholesale"
+  key = "discount_data"

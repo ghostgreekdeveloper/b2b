@@ -1,0 +1,16 @@
+# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
+
+client_id = "38079e81e0af2c8b9e369ddb761a32bc"
+name = "syncio"
+application_url = "https://example.com"
+embedded = true
+
+[webhooks]
+api_version = "2026-01"
+
+[access_scopes]
+# Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
+scopes = "read_product_feeds,read_product_listings,read_products,unauthenticated_read_product_inventory,unauthenticated_read_product_listings,unauthenticated_read_product_pickup_locations,unauthenticated_read_product_tags,write_product_feeds,write_product_listings,write_products"
+
+[auth]
+redirect_urls = [ "https://example.com/api/auth" ]

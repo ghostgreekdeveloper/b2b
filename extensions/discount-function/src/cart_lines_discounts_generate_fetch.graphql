@@ -1,0 +1,22 @@
+query CartFetchInput {
+  cart {
+    appUrl: attribute(key: "_b2b_url") { value }
+    buyerIdentity {
+      customer { id }
+    }
+    lines {
+      merchandise {
+        __typename
+        ... on ProductVariant {
+          id
+          product { id }
+        }
+      }
+      quantity
+    }
+  }
+  shop {
+    appUrlV1: metafield(namespace: "$app:b2b", key: "app_url") { value }
+    appUrlV2: metafield(namespace: "b2b_wholesale", key: "app_url") { value }
+  }
+}

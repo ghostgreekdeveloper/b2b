@@ -1,0 +1,20 @@
+query Input {
+  buyerJourney {
+    step
+  }
+  cart {
+    buyerIdentity {
+      customer {
+        discountData: metafield(namespace: "b2b_wholesale", key: "discount_data") {
+          value
+        }
+      }
+    }
+    cost {
+      subtotalAmount {
+        amount
+        currencyCode
+      }
+    }
+  }
+}

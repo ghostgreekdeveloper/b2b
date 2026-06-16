@@ -1,0 +1,7 @@
+api_version = "2026-01"
+
+[[extensions]]
+name = "Wholesale Prices Display"
+handle = "wholesale-prices"
+uid = "9d64d04c-45e0-5393-c8f0-cf0bb34bb688966e670d"
+type = "theme"

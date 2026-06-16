@@ -1,0 +1,21 @@
+api_version = "2026-01"
+
+[[extensions]]
+name = "B2B Checkout Validation"
+handle = "cart-checkout-validation"
+uid = "9beb9559-a34a-eca2-aa94-2cf3baa77d52afcba76e"
+type = "function"
+description = "Blocks checkout if the cart subtotal is below the customer's minimum order amount."
+
+  [[extensions.targeting]]
+  target = "cart.validations.generate.run"
+  input_query = "src/cart_validations_generate_run.graphql"
+  export = "run"
+
+  [extensions.build]
+  command = ""
+  path = "dist/function.wasm"
+
+  [[extensions.metafields]]
+  namespace = "b2b_wholesale"
+  key = "discount_data"
