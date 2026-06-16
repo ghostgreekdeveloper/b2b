@@ -14,6 +14,7 @@
     "setup": "prisma generate && prisma migrate deploy",
     "lint": "eslint --cache --cache-location ./node_modules/.cache/eslint .",
     "shopify": "shopify",
+    "studio": "prisma studio --port 5555 --hostname 0.0.0.0"
     "prisma": "prisma",
     "graphql-codegen": "graphql-codegen",
     "vite": "vite"
