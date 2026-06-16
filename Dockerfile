@@ -26,6 +26,6 @@ RUN npm run build
 RUN npm prune --omit=dev && npm cache clean --force
 
 EXPOSE 3000
-EXPOSE 5555  # Add this for Prisma Studio
+EXPOSE 5555 
 
 CMD ["npm", "run", "docker-start"]
