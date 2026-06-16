@@ -2,7 +2,7 @@
 
 client_id = "3fcc18d975522ff69a214a94a82bf719"
 name = "syncio"
-application_url = "https://canvas-titanium-absolutely-knight.trycloudflare.com"
+application_url = "https://stxfsax6miqly76azr21tujm.trackety.com"
 embedded = true
 
 [webhooks]
@@ -18,7 +18,7 @@ use_legacy_install_flow = false
 redirect_urls = [ "https://example.com/api/auth" ]
 
 [app_proxy]
-url = "https://canvas-titanium-absolutely-knight.trycloudflare.com/proxy"
+url = "https://stxfsax6miqly76azr21tujm.trackety.com/proxy"
 subpath = "b2b-wholesale"
 prefix = "a"
 
