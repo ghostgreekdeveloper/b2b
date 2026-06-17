@@ -473,7 +473,7 @@
     if (fb)  fb.remove();
     if (inj) inj.remove();
     Array.from(container.children).forEach(function (c) {
-      if (c.style.visibility === 'hidden') c.style.visibility = '';
+      if (c.style.display === 'none') c.style.display = '';
     });
 
     delete container.dataset.b2bApplied;
@@ -588,7 +588,7 @@
       fb.style.cssText = 'display:flex;align-items:center;gap:8px;flex-wrap:wrap;';
       // Hide existing children
       Array.from(container.children).forEach(function (c) {
-        if (!c.classList.contains('b2b-price-fallback')) c.style.visibility = 'hidden';
+        if (!c.classList.contains('b2b-price-fallback')) c.style.display = 'none';
       });
       container.appendChild(fb);
     }
