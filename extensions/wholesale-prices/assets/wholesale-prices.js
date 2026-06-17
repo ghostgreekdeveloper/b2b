@@ -473,7 +473,12 @@
     if (fb)  fb.remove();
     if (inj) inj.remove();
     Array.from(container.children).forEach(function (c) {
-      if (c.style.display === 'none') c.style.display = '';
+      // Undo whatever hide() applied
+      c.style.display    = '';
+      c.style.visibility = '';
+      c.style.height     = '';
+      c.style.overflow   = '';
+      if (T.hiddenClass) c.classList.remove(T.hiddenClass);
     });
 
     delete container.dataset.b2bApplied;
@@ -588,7 +593,7 @@
       fb.style.cssText = 'display:flex;align-items:center;gap:8px;flex-wrap:wrap;';
       // Hide existing children
       Array.from(container.children).forEach(function (c) {
-        if (!c.classList.contains('b2b-price-fallback')) c.style.display = 'none';
+        if (!c.classList.contains('b2b-price-fallback')) hide(c);
       });
       container.appendChild(fb);
     }
@@ -852,7 +857,17 @@
     if (!entry || !(entry.wholesalePriceCents > 0)) return;
     if (priceEl.dataset.b2bDone) return;
     priceEl.dataset.b2bDone = '1';
-    priceEl.textContent = fmt(entry.wholesalePriceCents);
+
+    var display = entry.priceDisplay || priceDisplay;
+    if (display === 'REPLACED') {
+      priceEl.textContent = fmt(entry.wholesalePriceCents);
+    } else {
+      // ORIGINAL_AND_DISCOUNTED: strikethrough original + wholesale
+      var origText = priceEl.textContent.trim();
+      priceEl.innerHTML =
+        (origText ? '<s style="color:#9ca3af;font-size:0.9em;margin-right:4px;">' + origText + '</s>' : '') +
+        '<span>' + fmt(entry.wholesalePriceCents) + '</span>';
+    }
   }
 
   // ── MutationObserver: new products added (infinite scroll, carousels, quick-view)
