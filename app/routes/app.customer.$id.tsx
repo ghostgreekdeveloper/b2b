@@ -255,9 +255,9 @@ export const action = async ({ params, request }: ActionFunctionArgs) => {
           cats.forEach((c: any) => { if (!assignedIds.includes(c.id)) assignedIds.push(c.id); });
         }
         if (assignedIds.length > 0) {
-          await db.$executeRaw`DELETE FROM customer_catalogs WHERE customerId = ${id}`;
+          await db.$executeRaw`DELETE FROM customer_catalogs WHERE "customerId" = ${id}`;
           for (const catId of assignedIds) {
-            await db.$executeRaw`INSERT OR IGNORE INTO customer_catalogs (customerId, catalogId) VALUES (${id}, ${catId})`;
+            await db.$executeRaw`INSERT INTO customer_catalogs ("customerId", "catalogId") VALUES (${id}, ${catId}) ON CONFLICT DO NOTHING`;
           }
           updateData.catalogId = assignedIds[0];
         }
@@ -269,7 +269,7 @@ export const action = async ({ params, request }: ActionFunctionArgs) => {
   if (intent === "reject") {
     updateData.applicationStatus = "REJECTED";
     updateData.catalogId = null;
-    await db.$executeRaw`DELETE FROM customer_catalogs WHERE customerId = ${id}`;
+    await db.$executeRaw`DELETE FROM customer_catalogs WHERE "customerId" = ${id}`;
   }
 
   const updated = await db.customers.update({

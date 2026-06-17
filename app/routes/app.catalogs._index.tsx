@@ -35,7 +35,7 @@ export const action = async ({ request }: ActionArgs) => {
     if (!catalogId) return json({ error: "missing catalogId" }, { status: 400 });
     // Detach customers, clear junction table, delete items, delete catalog
     await db.customers.updateMany({ where: { catalogId }, data: { catalogId: null } });
-    await db.$executeRaw`DELETE FROM customer_catalogs WHERE catalogId = ${catalogId}`;
+    await db.$executeRaw`DELETE FROM customer_catalogs WHERE "catalogId" = ${catalogId}`;
     await db.catalogItem.deleteMany({ where: { catalogId } });
     await db.catalog.delete({ where: { id: catalogId } });
     customerStateCache.delPrefix(`cs:${session.shop}:`);
