@@ -411,13 +411,33 @@
   // ── Show/hide a DOM element using the theme's mechanism ──────────────────────
   function show(el) {
     if (!el) return;
-    if (T.hiddenClass) el.classList.remove(T.hiddenClass);
-    else               el.style.display = '';
+    if (T.hiddenClass) {
+      el.classList.remove(T.hiddenClass);
+      el.style.visibility = '';
+      el.style.height     = '';
+      el.style.overflow   = '';
+    } else {
+      // Restore the natural display value saved before hiding, or force block.
+      // Never set '' — that lets CSS display:none take over again (Pursuit issue).
+      el.style.display = el.dataset.b2bDisplay || 'block';
+    }
   }
   function hide(el) {
     if (!el) return;
-    if (T.hiddenClass) el.classList.add(T.hiddenClass);
-    else               el.style.display = 'none';
+    if (T.hiddenClass) {
+      el.classList.add(T.hiddenClass);
+      // visually-hidden keeps the element in flow; collapse its space too
+      el.style.visibility = 'hidden';
+      el.style.height     = '0';
+      el.style.overflow   = 'hidden';
+    } else {
+      // Save the computed display value so show() can restore it exactly
+      if (!el.dataset.b2bDisplay) {
+        var d = window.getComputedStyle(el).display;
+        el.dataset.b2bDisplay = (d && d !== 'none') ? d : 'block';
+      }
+      el.style.display = 'none';
+    }
   }
   function isHidden(el) {
     if (!el) return true;
@@ -759,9 +779,84 @@
     setInterval(function () { if (minimumOrderCents > 0) enforceMinimumOrder(); }, 5000);
   }
 
+  // ── Predictive search price replacement ──────────────────────────────────────
+  // .predictive-search-item__price has no variant input — resolve via /products/{handle}.js
+  var handleToVariantId = {};
+  var handleFetching    = {};
+
+  function applyPredictiveSearchPrices() {
+    if (!customerId) return;
+    document.querySelectorAll('.predictive-search-item').forEach(function (item) {
+      var link    = item.querySelector('a[href]');
+      var priceEl = item.querySelector('.predictive-search-item__price');
+      if (!link || !priceEl || priceEl.dataset.b2bDone) return;
+
+      var href  = link.getAttribute('href') || '';
+      var match = href.match(/\/products\/([^?#/]+)/);
+      if (!match) return;
+      var handle = match[1];
+
+      // Already resolved — apply immediately
+      if (handleToVariantId[handle]) {
+        _setPredictivePrice(priceEl, handleToVariantId[handle]);
+        return;
+      }
+      if (handleFetching[handle]) return;
+      handleFetching[handle] = true;
+
+      fetch('/products/' + handle + '.js')
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (p) {
+          if (!p || !p.variants || !p.variants[0]) return;
+          var vid = String(p.variants[0].id);
+          handleToVariantId[handle] = vid;
+
+          if (priceMap[vid]) {
+            // Price already fetched — apply right away
+            document.querySelectorAll('.predictive-search-item').forEach(function (it) {
+              var l2 = it.querySelector('a[href]');
+              var pe = it.querySelector('.predictive-search-item__price');
+              if (!l2 || !pe || pe.dataset.b2bDone) return;
+              var m2 = (l2.getAttribute('href') || '').match(/\/products\/([^?#/]+)/);
+              if (m2 && handleToVariantId[m2[1]]) _setPredictivePrice(pe, handleToVariantId[m2[1]]);
+            });
+          } else if (!fetchedIds.has(vid)) {
+            // Need to fetch price for this variant
+            fetchedIds.add(vid);
+            fetch('/a/b2b-wholesale/prices?' + new URLSearchParams({ v: vid }).toString())
+              .then(function (r) { return r.ok ? r.json() : null; })
+              .then(function (data) {
+                if (!data) return;
+                (data.products || []).forEach(function (pr) {
+                  if (!pr.variantId || !(pr.wholesalePriceCents > 0)) return;
+                  var n = pr.variantId.includes('/') ? pr.variantId.split('/').pop() : pr.variantId;
+                  priceMap[n] = pr;
+                });
+                document.querySelectorAll('.predictive-search-item').forEach(function (it) {
+                  var l2 = it.querySelector('a[href]');
+                  var pe = it.querySelector('.predictive-search-item__price');
+                  if (!l2 || !pe || pe.dataset.b2bDone) return;
+                  var m2 = (l2.getAttribute('href') || '').match(/\/products\/([^?#/]+)/);
+                  if (m2 && handleToVariantId[m2[1]]) _setPredictivePrice(pe, handleToVariantId[m2[1]]);
+                });
+              }).catch(function () {});
+          }
+        }).catch(function () {});
+    });
+  }
+
+  function _setPredictivePrice(priceEl, variantId) {
+    var entry = priceMap[variantId];
+    if (!entry || !(entry.wholesalePriceCents > 0)) return;
+    if (priceEl.dataset.b2bDone) return;
+    priceEl.dataset.b2bDone = '1';
+    priceEl.textContent = fmt(entry.wholesalePriceCents);
+  }
+
   // ── MutationObserver: new products added (infinite scroll, carousels, quick-view)
   new MutationObserver(function (mutations) {
-    var needsFetch = false;
+    var needsFetch    = false;
+    var hasPredictive = false;
     mutations.forEach(function (m) {
       m.addedNodes.forEach(function (node) {
         if (node.nodeType !== 1) return;
@@ -778,11 +873,14 @@
         if (node.matches('form[action*="/cart/add"]') || node.querySelector('form[action*="/cart/add"]')) {
           needsFetch = true;
         }
+        // Predictive search items
+        if (node.matches('.predictive-search-item') || node.querySelector('.predictive-search-item')) {
+          hasPredictive = true;
+        }
       });
     });
-    // scheduleFetch triggers executeFetch which calls applyAllWholesalePrices once
-    // priceMap is confirmed — no separate setTimeout needed (avoids premature apply).
-    if (needsFetch) scheduleFetch(150);
+    if (needsFetch)    scheduleFetch(150);
+    if (hasPredictive) setTimeout(applyPredictiveSearchPrices, 120);
     if (customerId && minimumOrderCents > 0) setTimeout(enforceMinimumOrder, 30);
   }).observe(document.body, { childList: true, subtree: true });
 
