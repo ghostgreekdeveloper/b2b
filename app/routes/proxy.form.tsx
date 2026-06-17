@@ -406,6 +406,7 @@ ${body}
 function renderForm(rowsOrFields: any[], form: any, _shop: string, _customerId: string) {
   const ctaLabel = (form?.ctaButtonText as string) || "Submit Application";
   const formTitle = (form?.formName as string) ?? "";
+  const formSubtitle = (form?.formSubtitle as string) ?? "Fill in the details below to apply for a wholesale account.";
 
   // Handle both legacy FormField[] and new FormRow[] formats
   const rows: any[] = rowsOrFields.length > 0 && rowsOrFields[0]?.fields !== undefined
@@ -423,7 +424,7 @@ function renderForm(rowsOrFields: any[], form: any, _shop: string, _customerId: 
   <div class="form-card-accent"></div>
   <div class="form-card-body">
     ${formTitle ? `<h2>${escHtml(formTitle)}</h2>` : ""}
-    <p class="form-sub">Fill in the details below to apply for a wholesale account.</p>
+    ${formSubtitle ? `<p class="form-sub">${escHtml(formSubtitle)}</p>` : ""}
     <form method="POST">
 ${rowsHtml}
       <div class="form-footer">

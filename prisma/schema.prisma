@@ -20,6 +20,7 @@ model Form {
   autoTag                String    @default("")
   autoExemptTax          Boolean   @default(false)
   formName               String    @default("Wholesale Registration Form")
+  formSubtitle           String    @default("Fill in the details below to apply for a wholesale account.")
   submissionMessage      String    @default("Your application has been submitted!")
   // Status page messages
   pendingTitle           String    @default("Application Under Review")

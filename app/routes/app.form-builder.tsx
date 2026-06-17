@@ -48,6 +48,7 @@ interface FormRow {
 
 interface GlobalSettings {
   formName: string;
+  formSubtitle: string;
   urlHandle: string;
   ctaButtonText: string;
   approvalMode: string;
@@ -192,6 +193,7 @@ export const loader = async ({ request }: any) => {
   const rows = parseRows((form?.formFields as string) || "[]");
   const settings: GlobalSettings = {
     formName:         (form?.formName as string)         ?? "Wholesale Registration Form",
+    formSubtitle:     (form?.formSubtitle as string)     ?? "Fill in the details below to apply for a wholesale account.",
     urlHandle:        (form?.urlHandle as string)        ?? "register-wholesale",
     ctaButtonText:    (form?.ctaButtonText as string)    ?? "Submit Application",
     approvalMode:     (form?.approvalMode as string)     ?? "MANUAL",
@@ -253,6 +255,7 @@ export const action = async ({ request }: any) => {
   const payload = {
     formFields:          JSON.stringify(body.rows),
     formName:            body.settings.formName,
+    formSubtitle:        body.settings.formSubtitle,
     urlHandle:           handle,
     ctaButtonText:       body.settings.ctaButtonText,
     approvalMode:        body.settings.approvalMode,
@@ -1169,6 +1172,8 @@ function GlobalSettingsPanel({
 
   return (
     <BlockStack gap="400">
+      <TextField label="Form subtitle" value={settings.formSubtitle} onChange={(v) => set("formSubtitle", v)} multiline={2} autoComplete="off"
+        helpText="Shown below the form title." />
       <TextField label="CTA button label" value={settings.ctaButtonText} onChange={(v) => set("ctaButtonText", v)} autoComplete="off" />
 
       {/* URL handle — locked once a page is published */}
@@ -1455,7 +1460,7 @@ textarea{resize:vertical;min-height:96px}
   <div class="form-card-accent"></div>
   <div class="form-card-body">
     ${settings.formName ? `<h2>${escHtmlClient(settings.formName)}</h2>` : ""}
-    <p class="form-sub">Fill in the details below to apply for a wholesale account.</p>
+    ${settings.formSubtitle ? `<p class="form-sub">${escHtmlClient(settings.formSubtitle)}</p>` : ""}
     <form onsubmit="return false">
 ${rowsHtml}
       <div class="form-footer">
