@@ -7,6 +7,7 @@
   data-regular-sel="{{ block.settings.custom_regular_sel | default: '' }}"
   data-sale-sel="{{ block.settings.custom_sale_sel | default: '' }}"
   data-amount-sel="{{ block.settings.custom_amount_sel | default: '' }}"
+  data-sale-amount-sel="{{ block.settings.custom_sale_amount_sel | default: '' }}"
   data-compare-sel="{{ block.settings.custom_compare_sel | default: '' }}"
   data-hidden-class="{{ block.settings.custom_hidden_class | default: '' }}"
   data-predictive-search="{{ block.settings.enable_predictive_search }}"
@@ -66,9 +67,16 @@
     {
       "type": "text",
       "id": "custom_amount_sel",
-      "label": "Price amount element",
+      "label": "Regular price amount element",
       "default": ".price-item--regular",
-      "info": "The specific element whose text content is the price number."
+      "info": "Element whose text shows the regular price number (in the regular price section)."
+    },
+    {
+      "type": "text",
+      "id": "custom_sale_amount_sel",
+      "label": "Sale price amount element",
+      "default": ".price-item--sale",
+      "info": "Element whose text shows the sale price number (in the sale price section). Leave blank to use the same selector as above."
     },
     {
       "type": "text",

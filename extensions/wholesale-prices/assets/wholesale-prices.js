@@ -164,8 +164,8 @@
       preHideCSS:    (root.dataset.priceRoot || 'product-price') + '{opacity:0!important}',
       regularSel:    root.dataset.regularSel  || null,
       saleSel:       root.dataset.saleSel     || null,
-      regularAmtSel: root.dataset.amountSel   || '.money',
-      saleAmtSel:    root.dataset.amountSel   || '.money',
+      regularAmtSel: root.dataset.amountSel     || '.money',
+      saleAmtSel:    root.dataset.saleAmountSel || root.dataset.amountSel || '.money',
       compareAmtSel: root.dataset.compareSel  || null,
       hiddenClass:   root.dataset.hiddenClass || null,
     };
@@ -277,6 +277,8 @@
 
         revealPrices();
         applyAllWholesalePrices();
+        // Also handle any predictive-search items already rendered in the DOM on load
+        applyPredictiveSearchPrices();
       })
       .catch(function (err) {
         fetchInFlight = false;
@@ -533,10 +535,18 @@
     if (saleSection) {
       // Dawn-style: show sale section, put wholesale in .price-item--sale, original in compare-at
       var saleEl    = saleSection.querySelector(T.saleAmtSel);
+      // If saleAmtSel resolved to a strikethrough <s> (compare-at element), fall back to
+      // the explicit sale-price span so the wholesale price lands in the right element.
+      if (saleEl && saleEl.tagName === 'S') {
+        saleEl = saleSection.querySelector('.price-item--sale, .money') || saleEl;
+      }
       var compareEl = T.compareAmtSel ? saleSection.querySelector(T.compareAmtSel) : null;
       var regElO    = regSection ? regSection.querySelector(T.regularAmtSel) : null;
-      // Capture original text before we hide the regular section
-      var origText  = (regElO ? regElO.textContent.trim() : '') || fmt(entry.originalPriceCents);
+      // Use saved original if available — DOM may already be modified by a prior apply run
+      var origText  = container.dataset.b2bOriginal ||
+                      (regElO ? regElO.textContent.trim() : '') ||
+                      fmt(entry.originalPriceCents);
+      if (!container.dataset.b2bOriginal && origText) container.dataset.b2bOriginal = origText;
 
       if (saleEl) {
         saleEl.textContent = fmt(entry.wholesalePriceCents);
