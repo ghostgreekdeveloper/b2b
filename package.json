@@ -14,6 +14,7 @@
     "setup": "prisma generate && prisma migrate deploy",
     "lint": "eslint --cache --cache-location ./node_modules/.cache/eslint .",
     "shopify": "shopify",
+    "studio": "prisma studio --port 5555 --hostname 0.0.0.0",
     "prisma": "prisma",
     "graphql-codegen": "graphql-codegen",
     "vite": "vite"
@@ -36,7 +37,6 @@
     "@shopify/polaris": "^12.0.0",
     "@shopify/shopify-app-remix": "^3.7.0",
     "@shopify/shopify-app-session-storage-prisma": "^6.0.0",
-    "crypto": "^1.0.1",
     "file-saver": "^2.0.5",
     "fs": "^0.0.1-security",
     "isbot": "^5.1.0",

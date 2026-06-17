@@ -53,7 +53,7 @@ export async function writeCustomerDiscountMetafield(
   // ── Resolve all catalog IDs for this customer ──────────────────────────────
   // 1. Junction table
   const junctionRows = await db.$queryRaw<{ catalogId: number }[]>`
-    SELECT catalogId FROM customer_catalogs WHERE customerId = ${numericId}
+    SELECT "catalogId" FROM customer_catalogs WHERE "customerId" = ${numericId}
   `;
   let catalogIds = junctionRows.map((r) => Number(r.catalogId));
 
@@ -270,7 +270,7 @@ async function _getCustomersForCatalog(
     }),
     // Junction table path
     db.$queryRaw<{ customerId: string }[]>`
-      SELECT customerId FROM customer_catalogs WHERE catalogId = ${catalogId}
+      SELECT "customerId" FROM customer_catalogs WHERE "catalogId" = ${catalogId}
     `,
   ]);
 

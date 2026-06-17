@@ -99,7 +99,7 @@ export const loader = async ({ params, request }: LoaderFunctionArgs) => {
   // Load all catalogs currently assigned to this customer
   const numericCid = id.includes("/") ? id.split("/").pop()! : id;
   const junctionRows = await db.$queryRaw<{ catalogId: number }[]>`
-    SELECT catalogId FROM customer_catalogs WHERE customerId = ${numericCid}
+    SELECT "catalogId" FROM customer_catalogs WHERE "customerId" = ${numericCid}
   `;
   let assignedIds = junctionRows.map((r) => Number(r.catalogId));
   if (assignedIds.length === 0 && customer.catalog?.id) assignedIds = [customer.catalog.id];
@@ -173,9 +173,9 @@ export const action = async ({ params, request }: ActionFunctionArgs) => {
       cats.forEach((c: any) => { if (!assignedIds.includes(c.id)) assignedIds.push(c.id); });
     }
     if (assignedIds.length > 0) {
-      await db.$executeRaw`DELETE FROM customer_catalogs WHERE customerId = ${id}`;
+      await db.$executeRaw`DELETE FROM customer_catalogs WHERE "customerId" = ${id}`;
       for (const catId of assignedIds) {
-        await db.$executeRaw`INSERT OR IGNORE INTO customer_catalogs (customerId, catalogId) VALUES (${id}, ${catId})`;
+        await db.$executeRaw`INSERT INTO customer_catalogs ("customerId", "catalogId") VALUES (${id}, ${catId}) ON CONFLICT DO NOTHING`;
       }
       await db.customers.update({ where: { id }, data: { catalogId: assignedIds[0] } });
     }

@@ -99,7 +99,7 @@ export const loader = async ({ params, request }: LoaderArgs) => {
   const rawExtra = await db.$queryRaw<{
     discountType: string; fixedDiscountCents: number | null;
     fixedPriceCents: number | null; priceDisplay: string;
-  }[]>`SELECT discountType, fixedDiscountCents, fixedPriceCents, priceDisplay FROM "Catalog" WHERE id = ${catalogId}`;
+  }[]>`SELECT "discountType", "fixedDiscountCents", "fixedPriceCents", "priceDisplay" FROM "Catalog" WHERE id = ${catalogId}`;
   const extra = rawExtra[0] ?? { discountType: "PERCENT", fixedDiscountCents: null, fixedPriceCents: null, priceDisplay: "REPLACED" };
 
   return json({
@@ -422,7 +422,7 @@ export const action = async ({ request, params }: ActionArgs) => {
   // after the new fields were added, causing catalog.discountType to be undefined on the
   // frontend and default to "PERCENT" in the form submission.
   const dbType = await db.$queryRaw<{ discountType: string }[]>`
-    SELECT discountType FROM "Catalog" WHERE id = ${catalogId}
+    SELECT "discountType" FROM "Catalog" WHERE id = ${catalogId}
   `;
   const catalogDiscountType = dbType[0]?.discountType ?? "PERCENT";
 
@@ -447,14 +447,14 @@ export const action = async ({ request, params }: ActionArgs) => {
     } else if (catalogDiscountType === "FIXED_AMOUNT") {
       const fixedCents = Math.round(discount * 100);
       // Always persist the catalog-level amount so the proxy can compute prices dynamically
-      await db.$executeRaw`UPDATE "Catalog" SET fixedDiscountCents = ${fixedCents}, fixedPriceCents = NULL WHERE id = ${catalogId}`;
+      await db.$executeRaw`UPDATE "Catalog" SET "fixedDiscountCents" = ${fixedCents}, "fixedPriceCents" = NULL WHERE id = ${catalogId}`;
       if (applyToAll) {
         // Single SQL pass: compute base-minus-fixed for every item at once
         await db.$executeRaw`
           UPDATE "CatalogItem"
-          SET customDiscountPercent = CASE
-            WHEN customPriceCents IS NOT NULL AND customPriceCents > ${fixedCents}
-              THEN customPriceCents - ${fixedCents}
+          SET "customDiscountPercent" = CASE
+            WHEN "customPriceCents" IS NOT NULL AND "customPriceCents" > ${fixedCents}
+              THEN "customPriceCents" - ${fixedCents}
             ELSE NULL
           END
           WHERE catalogId = ${catalogId}
@@ -463,7 +463,7 @@ export const action = async ({ request, params }: ActionArgs) => {
     } else if (catalogDiscountType === "FIXED_PRICE") {
       const priceCents = Math.round(discount * 100);
       // Always persist so the proxy can use it as a flat-rate fallback
-      await db.$executeRaw`UPDATE "Catalog" SET fixedPriceCents = ${priceCents}, fixedDiscountCents = NULL WHERE id = ${catalogId}`;
+      await db.$executeRaw`UPDATE "Catalog" SET "fixedPriceCents" = ${priceCents}, "fixedDiscountCents" = NULL WHERE id = ${catalogId}`;
       if (applyToAll && priceCents > 0) {
         await db.catalogItem.updateMany({
           where: { catalogId },

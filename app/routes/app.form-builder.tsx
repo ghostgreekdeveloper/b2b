@@ -349,7 +349,7 @@ async function syncShopifyPage(
 
   const r = await admin.graphql(
     `mutation Cr($p:PageCreateInput!){pageCreate(page:$p){page{id}userErrors{field message}}}`,
-    { variables: { p: { title, handle, body, isPublished: true } } },
+    { variables: { p: { title, handle, body } } },
   );
   const rd = await r.json();
   const errs = rd?.data?.pageCreate?.userErrors;

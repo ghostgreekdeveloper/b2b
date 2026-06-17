@@ -1,21 +1,31 @@
-FROM node:18-alpine
-RUN apk add --no-cache openssl
+FROM node:20-alpine
 
-EXPOSE 3000
+# Install openssl for Prisma
+RUN apk add --no-cache openssl
 
 WORKDIR /app
 
-ENV NODE_ENV=production
-
+# Install ALL deps
 COPY package.json package-lock.json* ./
+RUN npm ci
 
-RUN npm ci --omit=dev && npm cache clean --force
-# Remove CLI packages since we don't need them in production by default.
-# Remove this line if you want to run CLI commands in your container.
-RUN npm remove @shopify/cli
-
+# Copy source
 COPY . .
 
+# Generate Prisma client
+RUN npx prisma generate
+
+# Set environment variables for build
+ENV NODE_ENV=production
+ENV NODE_OPTIONS="--max-old-space-size=4096"
+
+# Build the application
 RUN npm run build
+
+# Remove devDependencies after build
+RUN npm prune --omit=dev && npm cache clean --force
+
+EXPOSE 3000
+EXPOSE 5555 
 
 CMD ["npm", "run", "docker-start"]

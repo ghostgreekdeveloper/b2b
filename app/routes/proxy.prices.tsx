@@ -77,7 +77,7 @@ export const loader = async ({ request }: any) => {
   const cidsKey = `cids:${shopDomain}:${loggedInCustomerId}`;
   const cidsEntry = await catalogIdsCache.getOrCompute(cidsKey, async () => {
     const junctionRows = await db.$queryRaw<{ catalogId: number }[]>`
-      SELECT catalogId FROM customer_catalogs WHERE customerId = ${loggedInCustomerId}
+      SELECT "catalogId" FROM customer_catalogs WHERE "customerId" = ${loggedInCustomerId}
     `;
     let candidateIds = junctionRows.map((r) => Number(r.catalogId));
     if (candidateIds.length === 0 && legacyCatalogId) candidateIds = [legacyCatalogId];
@@ -107,8 +107,8 @@ export const loader = async ({ request }: any) => {
       }
       for (const newId of newIds) {
         await db.$executeRaw`
-          INSERT OR IGNORE INTO customer_catalogs (customerId, catalogId)
-          VALUES (${loggedInCustomerId}, ${newId})
+          INSERT INTO customer_catalogs ("customerId", "catalogId") 
+          VALUES (${loggedInCustomerId}, ${newId}) ON CONFLICT DO NOTHING
         `;
       }
     }
@@ -150,7 +150,7 @@ export const loader = async ({ request }: any) => {
         `cv:${cid}`,
         async () => {
           const rows = await db.$queryRaw<{ cacheVersion: number }[]>`
-            SELECT cacheVersion FROM "Catalog" WHERE id = ${cid}
+            SELECT "cacheVersion" FROM "Catalog" WHERE id = ${cid}
           `;
           return Number(rows[0]?.cacheVersion ?? 1);
         },
@@ -160,8 +160,8 @@ export const loader = async ({ request }: any) => {
       return catalogDataCache.getOrCompute(`cdata:${cid}:v${version}`, async (): Promise<CatalogData> => {
         const [settingRows, rawItems] = await Promise.all([
           db.$queryRaw<any[]>`
-            SELECT discountType, defaultDiscountPercent, fixedDiscountCents,
-                   fixedPriceCents, priceDisplay
+           SELECT "discountType", "defaultDiscountPercent", "fixedDiscountCents",
+           "fixedPriceCents", "priceDisplay"
             FROM "Catalog" WHERE id = ${cid} AND status = 'active'
           `,
           db.catalogItem.findMany({
