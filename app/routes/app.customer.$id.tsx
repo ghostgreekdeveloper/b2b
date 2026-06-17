@@ -13,7 +13,7 @@ import {
   clearCustomerDiscountMetafield,
 } from "../writeCustomerMetafield.server";
 import { customerStateCache, catalogIdsCache } from "../cache.server";
-import { sendEmail, approvedHtml, rejectedHtml } from "../email.server";
+import { sendEmail, approvedHtml, rejectedHtml, parseEmailBlocks, renderEmailBlocks } from "../email.server";
 
 export const loader = async ({ params, request }: LoaderFunctionArgs) => {
   const { admin } = await authenticate.admin(request);
@@ -325,11 +325,17 @@ export const action = async ({ params, request }: ActionFunctionArgs) => {
 
       if (intent === "approve") {
         const subject = (formSettings.emailApprovedSubject as string) || "Your wholesale application has been approved";
-        const html    = approvedHtml({ customerName: custName, shopName: shop, message: (formSettings.emailApprovedBody as string) || (formSettings.acceptedMessage as string) || "Your wholesale account is approved and active.", shopUrl: `https://${shop}`, fromName, accentColor: accent });
+        const approvedBlocks = parseEmailBlocks((formSettings.emailApprovedBlocks as string) || "[]");
+        const html = approvedBlocks.length > 0
+          ? renderEmailBlocks(approvedBlocks, { customerName: custName, shopName: shop })
+          : approvedHtml({ customerName: custName, shopName: shop, message: (formSettings.emailApprovedBody as string) || (formSettings.acceptedMessage as string) || "Your wholesale account is approved and active.", shopUrl: `https://${shop}`, fromName, accentColor: accent });
         sendEmail({ apiKey, to: customerEmail, subject, shopDomain: shop, html, from }).catch((err) => console.error("[B2B] approved email failed:", err));
       } else {
         const subject = (formSettings.emailRejectedSubject as string) || "Update on your wholesale application";
-        const html    = rejectedHtml({ customerName: custName, shopName: shop, message: (formSettings.emailRejectedBody as string) || (formSettings.rejectedMessage as string) || "Unfortunately your application wasn't approved at this time.", fromName, accentColor: accent });
+        const rejectedBlocks = parseEmailBlocks((formSettings.emailRejectedBlocks as string) || "[]");
+        const html = rejectedBlocks.length > 0
+          ? renderEmailBlocks(rejectedBlocks, { customerName: custName, shopName: shop })
+          : rejectedHtml({ customerName: custName, shopName: shop, message: (formSettings.emailRejectedBody as string) || (formSettings.rejectedMessage as string) || "Unfortunately your application wasn't approved at this time.", fromName, accentColor: accent });
         sendEmail({ apiKey, to: customerEmail, subject, shopDomain: shop, html, from }).catch((err) => console.error("[B2B] rejected email failed:", err));
       }
     }

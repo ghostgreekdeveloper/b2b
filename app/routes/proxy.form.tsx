@@ -15,7 +15,7 @@
 
 import { authenticate } from "../shopify.server";
 import db from "../db.server";
-import { sendEmail, newApplicationHtml, pendingHtml } from "../email.server";
+import { sendEmail, newApplicationHtml, pendingHtml, parseEmailBlocks, renderEmailBlocks } from "../email.server";
 
 const NUMERIC_RE = /^\d{1,20}$/;
 
@@ -208,7 +208,10 @@ export const action = async ({ request }: any) => {
     console.log("[B2B] pending email check:", { hasApiKey: !!apiKey, email: standard.email || "(none)", enabled: form.emailPendingEnabled });
     if (apiKey && standard.email && form.emailPendingEnabled) {
       const pendingSubject = (form.emailPendingSubject as string) || "We received your application";
-      const pendingHtmlOut = pendingHtml({ customerName: custName, shopName: shop, message: (form.emailPendingBody as string) || "Thank you for applying! Our team will review your application and get back to you shortly.", fromName, accentColor: accent });
+      const pendingBlocks = parseEmailBlocks((form.emailPendingBlocks as string) || "[]");
+      const pendingHtmlOut = pendingBlocks.length > 0
+        ? renderEmailBlocks(pendingBlocks, { customerName: custName, shopName: shop })
+        : pendingHtml({ customerName: custName, shopName: shop, message: (form.emailPendingBody as string) || "Thank you for applying! Our team will review your application and get back to you shortly.", fromName, accentColor: accent });
       sendEmail({ apiKey, to: standard.email, subject: pendingSubject, shopDomain: shop, html: pendingHtmlOut, from }).catch((err) => console.error("[B2B] pending email failed:", err));
     }
 
