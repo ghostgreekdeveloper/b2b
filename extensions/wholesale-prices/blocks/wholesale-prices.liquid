@@ -9,6 +9,8 @@
   data-amount-sel="{{ block.settings.custom_amount_sel | default: '' }}"
   data-compare-sel="{{ block.settings.custom_compare_sel | default: '' }}"
   data-hidden-class="{{ block.settings.custom_hidden_class | default: '' }}"
+  data-predictive-search="{{ block.settings.enable_predictive_search }}"
+  data-predictive-price-sel="{{ block.settings.predictive_price_sel | default: '.predictive-search-item__price' }}"
   style="display:none"
 ></div>
 <script src="{{ 'wholesale-prices.js' | asset_url }}" defer></script>
@@ -81,6 +83,24 @@
       "label": "Hidden CSS class",
       "default": "price__hidden",
       "info": "CSS class that visually hides an element in your theme. Leave blank to use display:none."
+    },
+    {
+      "type": "header",
+      "content": "Predictive search"
+    },
+    {
+      "type": "checkbox",
+      "id": "enable_predictive_search",
+      "label": "Replace prices in predictive search",
+      "default": true,
+      "info": "Updates the price shown in the search dropdown for approved wholesale customers."
+    },
+    {
+      "type": "text",
+      "id": "predictive_price_sel",
+      "label": "Predictive search price selector",
+      "default": ".predictive-search-item__price",
+      "info": "CSS selector for the price element inside each search result item. Inspect your theme's search dropdown HTML to find this."
     }
   ]
 }

@@ -11,10 +11,12 @@
     return;
   }
 
-  var customerId   = root.dataset.customerId   || '';
-  var currencyCode = (root.dataset.currency    || 'USD').toUpperCase();
-  var shopLocale   = document.documentElement.lang || navigator.language || 'en';
-  var themeName    = root.dataset.theme || 'dawn';
+  var customerId          = root.dataset.customerId   || '';
+  var currencyCode        = (root.dataset.currency    || 'USD').toUpperCase();
+  var shopLocale          = document.documentElement.lang || navigator.language || 'en';
+  var themeName           = root.dataset.theme || 'dawn';
+  var enablePredictive    = root.dataset.predictiveSearch !== 'false';
+  var predictivePriceSel  = root.dataset.predictivePriceSel || '.predictive-search-item__price';
 
   console.log('[B2B] theme=' + themeName + ' | customer=' + (customerId || '(guest)') + ' | currency=' + currencyCode);
 
@@ -411,31 +413,31 @@
   // ── Show/hide a DOM element using the theme's mechanism ──────────────────────
   function show(el) {
     if (!el) return;
+    // Always restore display first — overrides any CSS display:none (e.g. Pursuit
+    // hides .price__sale via CSS when .price--on-sale is absent on the parent).
+    el.style.display = el.dataset.b2bDisplay || 'block';
     if (T.hiddenClass) {
       el.classList.remove(T.hiddenClass);
       el.style.visibility = '';
       el.style.height     = '';
       el.style.overflow   = '';
-    } else {
-      // Restore the natural display value saved before hiding, or force block.
-      // Never set '' — that lets CSS display:none take over again (Pursuit issue).
-      el.style.display = el.dataset.b2bDisplay || 'block';
     }
   }
   function hide(el) {
     if (!el) return;
+    // Save the computed display value so show() can restore it exactly.
+    if (!el.dataset.b2bDisplay) {
+      var d = window.getComputedStyle(el).display;
+      el.dataset.b2bDisplay = (d && d !== 'none') ? d : 'block';
+    }
     if (T.hiddenClass) {
       el.classList.add(T.hiddenClass);
-      // visually-hidden keeps the element in flow; collapse its space too
+      // visually-hidden keeps element in flow; also collapse its space
       el.style.visibility = 'hidden';
       el.style.height     = '0';
       el.style.overflow   = 'hidden';
+      el.style.display    = 'none';
     } else {
-      // Save the computed display value so show() can restore it exactly
-      if (!el.dataset.b2bDisplay) {
-        var d = window.getComputedStyle(el).display;
-        el.dataset.b2bDisplay = (d && d !== 'none') ? d : 'block';
-      }
       el.style.display = 'none';
     }
   }
@@ -785,10 +787,10 @@
   var handleFetching    = {};
 
   function applyPredictiveSearchPrices() {
-    if (!customerId) return;
+    if (!customerId || !enablePredictive) return;
     document.querySelectorAll('.predictive-search-item').forEach(function (item) {
       var link    = item.querySelector('a[href]');
-      var priceEl = item.querySelector('.predictive-search-item__price');
+      var priceEl = item.querySelector(predictivePriceSel);
       if (!link || !priceEl || priceEl.dataset.b2bDone) return;
 
       var href  = link.getAttribute('href') || '';
@@ -815,7 +817,7 @@
             // Price already fetched — apply right away
             document.querySelectorAll('.predictive-search-item').forEach(function (it) {
               var l2 = it.querySelector('a[href]');
-              var pe = it.querySelector('.predictive-search-item__price');
+              var pe = it.querySelector(predictivePriceSel);
               if (!l2 || !pe || pe.dataset.b2bDone) return;
               var m2 = (l2.getAttribute('href') || '').match(/\/products\/([^?#/]+)/);
               if (m2 && handleToVariantId[m2[1]]) _setPredictivePrice(pe, handleToVariantId[m2[1]]);
@@ -834,7 +836,7 @@
                 });
                 document.querySelectorAll('.predictive-search-item').forEach(function (it) {
                   var l2 = it.querySelector('a[href]');
-                  var pe = it.querySelector('.predictive-search-item__price');
+                  var pe = it.querySelector(predictivePriceSel);
                   if (!l2 || !pe || pe.dataset.b2bDone) return;
                   var m2 = (l2.getAttribute('href') || '').match(/\/products\/([^?#/]+)/);
                   if (m2 && handleToVariantId[m2[1]]) _setPredictivePrice(pe, handleToVariantId[m2[1]]);
