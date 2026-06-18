@@ -164,6 +164,7 @@ export const syncSessionCache = new TtlCache<{
   seenVariantGids: string[];
   added:           number;
   updated:         number;
+  syncStatuses:    string[];
 }>(
   50,
   15 * 60_000

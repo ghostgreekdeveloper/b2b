@@ -18,16 +18,18 @@ const PAGE_SIZE = 50;
 
 // ── Loader ────────────────────────────────────────────────────────────────────
 export const loader = async ({ params, request }: LoaderArgs) => {
-  const { admin } = await authenticate.admin(request);
+  const { admin, session } = await authenticate.admin(request);
+  const shop = session.shop;
   const catalogId = Number(params.id);
 
-  const catalog = await db.catalog.findUnique({
-    where: { id: catalogId },
+  const catalog = await db.catalog.findFirst({
+    where: { id: catalogId, shopDomain: shop },
     include: { items: true },
   });
   if (!catalog) throw new Response("Catalog not found", { status: 404 });
 
   const segments = await db.segment.findMany({
+    where: { shopDomain: shop },
     select: { id: true, title: true },
     orderBy: { title: "asc" },
   });
@@ -36,19 +38,20 @@ export const loader = async ({ params, request }: LoaderArgs) => {
     where: { catalogId, applicationStatus: "ACCEPTED" },
   });
 
-  // One Shopify query for status + collections for every unique product
+  // Fetch Shopify status + collections for every unique product, batched in groups of 250
   const uniqueProductIds = [
     ...new Set(catalog.items.map((i) => i.productId.toString())),
   ];
-  const productGids = uniqueProductIds
-    .slice(0, 250)
-    .map((id) => (id.startsWith("gid://") ? id : `gid://shopify/Product/${id}`));
 
   type ProductMeta = { status: string; collections: string[] };
   const productMeta: Record<string, ProductMeta> = {};
   let allCollections: string[] = [];
 
-  if (productGids.length > 0) {
+  for (let bStart = 0; bStart < uniqueProductIds.length; bStart += 250) {
+    const batch = uniqueProductIds.slice(bStart, bStart + 250);
+    const productGids = batch.map((id) =>
+      id.startsWith("gid://") ? id : `gid://shopify/Product/${id}`
+    );
     try {
       const res = await admin.graphql(
         `query ProductMeta($ids: [ID!]!) {
@@ -70,11 +73,11 @@ export const loader = async ({ params, request }: LoaderArgs) => {
         productMeta[numId] = { status: node.status ?? "ACTIVE", collections: cols };
         for (const col of cols) if (!allCollections.includes(col)) allCollections.push(col);
       }
-      allCollections.sort();
     } catch (e) {
       console.error("[B2B] product meta fetch failed:", e);
     }
   }
+  allCollections.sort();
 
   const items = catalog.items.map((item) => {
     const pid = item.productId.toString();
@@ -128,9 +131,17 @@ export const loader = async ({ params, request }: LoaderArgs) => {
 
 // ── Action ────────────────────────────────────────────────────────────────────
 export const action = async ({ request, params }: ActionArgs) => {
-  const { admin } = await authenticate.admin(request);
+  const { admin, session } = await authenticate.admin(request);
+  const shop      = session.shop;
   const catalogId = Number(params.id);
   const formData  = await request.formData();
+
+  // Verify this catalog belongs to the current shop
+  const ownedCheck = await db.catalog.findFirst({
+    where: { id: catalogId, shopDomain: shop },
+    select: { id: true },
+  });
+  if (!ownedCheck) return json({ success: false, error: "Not found" }, { status: 404 });
   const intent    = formData.get("_action")?.toString();
 
   // ── Manually add products via resource picker ──────────────────────────────
@@ -251,36 +262,49 @@ export const action = async ({ request, params }: ActionArgs) => {
       };
     }
 
+    const syncStatusesRaw = formData.get("syncStatuses")?.toString() ?? "ACTIVE,DRAFT";
+    const syncStatuses = syncStatusesRaw.split(",").filter(Boolean);
+
     const sessionId = `sync_${catalogId}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     syncSessionCache.set(sessionId, {
       catalogId,
       autoInclude:     catalog.autoIncludeProducts ?? false,
       existingMap,
       seenVariantGids: [],
-      added:   0,
-      updated: 0,
+      added:           0,
+      updated:         0,
+      syncStatuses,
     });
 
     return json({ success: true, intent: "syncStart", sessionId, total });
   }
 
   if (intent === "syncPage") {
-    const sessionId = formData.get("sessionId")?.toString() ?? "";
-    const cursor    = formData.get("cursor")?.toString() || null;
-    const session   = syncSessionCache.get(sessionId);
-    if (!session || session.catalogId !== catalogId) {
+    const sessionId  = formData.get("sessionId")?.toString() ?? "";
+    const cursor     = formData.get("cursor")?.toString() || null;
+    const syncSess   = syncSessionCache.get(sessionId);
+    if (!syncSess || syncSess.catalogId !== catalogId) {
       return json({ success: false, error: "Sync session expired — please restart." });
     }
+
+    // Build Shopify status filter query string
+    const statuses = syncSess.syncStatuses ?? ["ACTIVE", "DRAFT"];
+    const wantActive = statuses.includes("ACTIVE");
+    const wantDraft  = statuses.includes("DRAFT");
+    const statusQuery =
+      wantActive && wantDraft ? null
+      : wantDraft  ? "status:draft"
+      : "status:active";
 
     // Fetch one page of 250 products from Shopify
     let pageData: any;
     try {
       const res = await admin.graphql(
-        `query SyncPage($cursor: String) {
-          products(first: 250, after: $cursor) {
+        `query SyncPage($cursor: String, $query: String) {
+          products(first: 250, after: $cursor, query: $query) {
             pageInfo { hasNextPage endCursor }
             nodes {
-              id title
+              id title status
               featuredImage { url }
               variants(first: 100) {
                 nodes { id sku price image { url } }
@@ -288,7 +312,7 @@ export const action = async ({ request, params }: ActionArgs) => {
             }
           }
         }`,
-        { variables: { cursor } }
+        { variables: { cursor, query: statusQuery } }
       );
       pageData = await res.json();
     } catch (e: any) {
@@ -314,13 +338,13 @@ export const action = async ({ request, params }: ActionArgs) => {
         const price    = Math.round(parseFloat(variant.price) * 100);
         const img      = variant.image?.url ?? product.featuredImage?.url ?? null;
 
-        session.seenVariantGids.push(gid);
+        syncSess.seenVariantGids.push(gid);
 
-        const ex = session.existingMap[gid];
+        const ex = syncSess.existingMap[gid];
         if (ex) {
           // Sync only refreshes metadata + base price; never overwrites manual discounts
           toUpdate.push({ id: ex.id, name: product.title, sku: variant.sku ?? "", img, priceCents: BigInt(price) });
-        } else if (session.autoInclude) {
+        } else if (syncSess.autoInclude) {
           toCreate.push({
             catalogId,
             productId:             numericProductId,
@@ -338,10 +362,10 @@ export const action = async ({ request, params }: ActionArgs) => {
     // Batch create (single INSERT … VALUES …)
     if (toCreate.length > 0) {
       await db.catalogItem.createMany({ data: toCreate });
-      session.added += toCreate.length;
+      syncSess.added += toCreate.length;
     }
 
-    // Batch update: parallel chunks of 50 (SQLite handles concurrent writes fine)
+    // Batch update: parallel chunks of 50
     const CHUNK = 50;
     for (let i = 0; i < toUpdate.length; i += CHUNK) {
       await Promise.all(
@@ -353,10 +377,10 @@ export const action = async ({ request, params }: ActionArgs) => {
         )
       );
     }
-    session.updated += toUpdate.length;
+    syncSess.updated += toUpdate.length;
 
     // Persist rolling counters back to cache
-    syncSessionCache.set(sessionId, session);
+    syncSessionCache.set(sessionId, syncSess);
 
     return json({
       success:      true,
@@ -373,14 +397,14 @@ export const action = async ({ request, params }: ActionArgs) => {
 
   if (intent === "syncFinalize") {
     const sessionId = formData.get("sessionId")?.toString() ?? "";
-    const session   = syncSessionCache.get(sessionId);
-    if (!session || session.catalogId !== catalogId) {
+    const syncSessF = syncSessionCache.get(sessionId);
+    if (!syncSessF || syncSessF.catalogId !== catalogId) {
       return json({ success: false, error: "Sync session expired — please restart." });
     }
 
     // Delete catalog items whose Shopify variant no longer exists
-    const seenSet = new Set(session.seenVariantGids);
-    const orphanIds = Object.entries(session.existingMap)
+    const seenSet = new Set(syncSessF.seenVariantGids);
+    const orphanIds = Object.entries(syncSessF.existingMap)
       .filter(([gid]) => !seenSet.has(gid))
       .map(([, item]) => item.id);
 
@@ -397,10 +421,10 @@ export const action = async ({ request, params }: ActionArgs) => {
     return json({
       success:  true,
       intent:   "syncFinalize",
-      added:    session.added,
-      updated:  session.updated,
+      added:    syncSessF.added,
+      updated:  syncSessF.updated,
       removed,
-      total:    session.seenVariantGids.length,
+      total:    syncSessF.seenVariantGids.length,
     });
   }
 
@@ -576,7 +600,11 @@ export default function CatalogDetailPage() {
   // Filter + pagination state
   const [search, setSearch]                 = useState("");
   const [filterCollection, setFilterCollection] = useState("");
+  const [filterStatus, setFilterStatus]     = useState<"" | "ACTIVE" | "DRAFT">("");
   const [page, setPage]                     = useState(0);
+
+  // Sync status filter (which Shopify product statuses to pull in during sync)
+  const [syncStatuses, setSyncStatuses] = useState<{ ACTIVE: boolean; DRAFT: boolean }>({ ACTIVE: true, DRAFT: true });
 
   const mark = () => setUnsaved(true);
 
@@ -589,15 +617,18 @@ export default function CatalogDetailPage() {
         item.sku.toLowerCase().includes(q);
       const matchCol =
         !filterCollection || item.collections.includes(filterCollection);
-      return matchSearch && matchCol;
+      const matchStatus =
+        !filterStatus || item.shopifyStatus === filterStatus;
+      return matchSearch && matchCol && matchStatus;
     });
-  }, [catalog.items, search, filterCollection]);
+  }, [catalog.items, search, filterCollection, filterStatus]);
 
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
   const pageItems  = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
 
   const onSearch     = (v: string) => { setSearch(v); setPage(0); };
   const onCollection = (v: string) => { setFilterCollection(v); setPage(0); };
+  const onStatus     = (v: string) => { setFilterStatus(v as "" | "ACTIVE" | "DRAFT"); setPage(0); };
 
   // Per-item price helpers
   const openEdit = (id: string, currentCents: number) => {
@@ -741,6 +772,8 @@ export default function CatalogDetailPage() {
     setSyncError(null);
     const fd = new FormData();
     fd.append("_action", "syncStart");
+    const statusList = Object.entries(syncStatuses).filter(([, v]) => v).map(([k]) => k).join(",");
+    fd.append("syncStatuses", statusList || "ACTIVE");
     _syncSubmit(fd);
   };
 
@@ -1123,29 +1156,47 @@ export default function CatalogDetailPage() {
                       <span>+</span> Add products
                     </button>
 
-                    <button
-                      onClick={isSyncing ? () => { syncCancelRef.current = true; } : triggerSync}
-                      disabled={syncPhase === "finalizing"}
-                      title={isSyncing ? "Cancel sync" : "Sync products from Shopify"}
-                      style={{
-                        ...btnBase,
-                        padding: "7px 15px", borderRadius: 8,
-                        border: `1px solid ${isSyncing ? "#fca5a5" : "#c7d2fe"}`,
-                        background: isSyncing ? "#fef2f2" : "#fff",
-                        color: isSyncing ? "#b91c1c" : "#4f46e5",
-                        fontSize: 13, fontWeight: 600,
-                        display: "flex", alignItems: "center", gap: 6,
-                        opacity: syncPhase === "finalizing" ? 0.5 : 1,
-                      }}
-                    >
-                      <span style={{
-                        display: "inline-block",
-                        animation: isSyncing ? "spin 0.8s linear infinite" : "none",
-                      }}>⟳</span>
-                      {isSyncing
-                        ? (syncPhase === "finalizing" ? "Finalizing…" : `${syncCurrent.toLocaleString()}/${syncTotal > 0 ? syncTotal.toLocaleString() : "…"} ✕`)
-                        : "Sync"}
-                    </button>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <button
+                        onClick={isSyncing ? () => { syncCancelRef.current = true; } : triggerSync}
+                        disabled={syncPhase === "finalizing"}
+                        title={isSyncing ? "Cancel sync" : "Sync products from Shopify"}
+                        style={{
+                          ...btnBase,
+                          padding: "7px 15px", borderRadius: 8,
+                          border: `1px solid ${isSyncing ? "#fca5a5" : "#c7d2fe"}`,
+                          background: isSyncing ? "#fef2f2" : "#fff",
+                          color: isSyncing ? "#b91c1c" : "#4f46e5",
+                          fontSize: 13, fontWeight: 600,
+                          display: "flex", alignItems: "center", gap: 6,
+                          opacity: syncPhase === "finalizing" ? 0.5 : 1,
+                        }}
+                      >
+                        <span style={{ display: "inline-block", animation: isSyncing ? "spin 0.8s linear infinite" : "none" }}>⟳</span>
+                        {isSyncing
+                          ? (syncPhase === "finalizing" ? "Finalizing…" : `${syncCurrent.toLocaleString()}/${syncTotal > 0 ? syncTotal.toLocaleString() : "…"} ✕`)
+                          : "Sync"}
+                      </button>
+                      {/* Sync status filter — which Shopify statuses to include */}
+                      {!isSyncing && (
+                        <div style={{ display: "flex", gap: 4 }}>
+                          {(["ACTIVE", "DRAFT"] as const).map((s) => (
+                            <button
+                              key={s}
+                              onClick={() => setSyncStatuses((prev) => ({ ...prev, [s]: !prev[s] }))}
+                              title={`${syncStatuses[s] ? "Exclude" : "Include"} ${s.toLowerCase()} products in sync`}
+                              style={{
+                                ...btnBase,
+                                padding: "4px 9px", borderRadius: 6, fontSize: 11, fontWeight: 700,
+                                border: `1px solid ${syncStatuses[s] ? (s === "ACTIVE" ? "#86efac" : "#fef08a") : "#e2e8f0"}`,
+                                background: syncStatuses[s] ? (s === "ACTIVE" ? "#f0fdf4" : "#fefce8") : "#f8fafc",
+                                color: syncStatuses[s] ? (s === "ACTIVE" ? "#15803d" : "#854d0e") : "#94a3b8",
+                              }}
+                            >{s === "ACTIVE" ? "Active" : "Draft"}</button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
 
                     {catalog.discountType === "PERCENT" && (
                       <div style={{ display: "flex", alignItems: "center", gap: 6,
@@ -1247,9 +1298,21 @@ export default function CatalogDetailPage() {
                       />
                     </div>
                   )}
-                  {search && (
+                  <div style={{ flex: "0 0 160px" }}>
+                    <Select
+                      label="" labelHidden
+                      options={[
+                        { label: "All statuses", value: "" },
+                        { label: "Active only",  value: "ACTIVE" },
+                        { label: "Draft only",   value: "DRAFT" },
+                      ]}
+                      value={filterStatus}
+                      onChange={onStatus}
+                    />
+                  </div>
+                  {(search || filterCollection || filterStatus) && (
                     <button
-                      onClick={() => onSearch("")}
+                      onClick={() => { onSearch(""); onCollection(""); onStatus(""); }}
                       style={{ ...btnBase, background: "none", color: "#94a3b8", fontSize: 13, padding: "0 4px" }}
                     >✕ Clear</button>
                   )}
@@ -1546,48 +1609,63 @@ export default function CatalogDetailPage() {
                   </div>
                 )}
 
-                {/* Pagination */}
-                {totalPages > 1 && (
-                  <div style={{
-                    padding: "14px 22px", borderTop: "1px solid #f1f5f9",
-                    display: "flex", alignItems: "center", justifyContent: "space-between",
-                    background: "#fafafa",
-                  }}>
-                    <button
-                      onClick={() => setPage((p) => Math.max(0, p - 1))}
-                      disabled={page === 0}
-                      style={{
-                        ...btnBase,
-                        padding: "7px 18px", borderRadius: 8,
-                        border: "1px solid #e2e8f0",
-                        background: page === 0 ? "#f8fafc" : "#fff",
-                        fontSize: 13, fontWeight: 600,
-                        color: page === 0 ? "#cbd5e1" : "#374151",
-                      }}
-                    >
-                      ← Prev
-                    </button>
-                    <span style={{ fontSize: 12.5, color: "#64748b", fontWeight: 500 }}>
-                      {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, filtered.length)}
-                      <span style={{ color: "#cbd5e1" }}> / </span>
-                      {filtered.length}
-                    </span>
-                    <button
-                      onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
-                      disabled={page >= totalPages - 1}
-                      style={{
-                        ...btnBase,
-                        padding: "7px 18px", borderRadius: 8,
-                        border: "1px solid #e2e8f0",
-                        background: page >= totalPages - 1 ? "#f8fafc" : "#fff",
-                        fontSize: 13, fontWeight: 600,
-                        color: page >= totalPages - 1 ? "#cbd5e1" : "#374151",
-                      }}
-                    >
-                      Next →
-                    </button>
-                  </div>
-                )}
+                {/* Pagination — numbered pages */}
+                {totalPages > 1 && (() => {
+                  // Show up to 7 page buttons; collapse middle if many pages
+                  const MAX_VISIBLE = 7;
+                  const pages: (number | "…")[] = [];
+                  if (totalPages <= MAX_VISIBLE) {
+                    for (let i = 0; i < totalPages; i++) pages.push(i);
+                  } else {
+                    pages.push(0);
+                    if (page > 3) pages.push("…");
+                    for (let i = Math.max(1, page - 1); i <= Math.min(totalPages - 2, page + 1); i++) pages.push(i);
+                    if (page < totalPages - 4) pages.push("…");
+                    pages.push(totalPages - 1);
+                  }
+                  const pgBtn: React.CSSProperties = {
+                    ...btnBase,
+                    minWidth: 34, height: 34, borderRadius: 8,
+                    border: "1px solid #e2e8f0",
+                    fontSize: 13, fontWeight: 600,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                  };
+                  return (
+                    <div style={{
+                      padding: "12px 22px", borderTop: "1px solid #f1f5f9",
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      gap: 4, background: "#fafafa", flexWrap: "wrap",
+                    }}>
+                      <button
+                        onClick={() => setPage((p) => Math.max(0, p - 1))}
+                        disabled={page === 0}
+                        style={{ ...pgBtn, background: page === 0 ? "#f8fafc" : "#fff", color: page === 0 ? "#cbd5e1" : "#374151", padding: "0 12px" }}
+                      >←</button>
+                      {pages.map((p, i) =>
+                        p === "…" ? (
+                          <span key={`ellipsis-${i}`} style={{ fontSize: 13, color: "#94a3b8", padding: "0 4px" }}>…</span>
+                        ) : (
+                          <button
+                            key={p}
+                            onClick={() => setPage(p as number)}
+                            style={{
+                              ...pgBtn,
+                              background: page === p ? "#6366f1" : "#fff",
+                              color: page === p ? "#fff" : "#374151",
+                              border: page === p ? "1px solid #6366f1" : "1px solid #e2e8f0",
+                              boxShadow: page === p ? "0 1px 4px rgba(99,102,241,0.3)" : "none",
+                            }}
+                          >{(p as number) + 1}</button>
+                        )
+                      )}
+                      <button
+                        onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+                        disabled={page >= totalPages - 1}
+                        style={{ ...pgBtn, background: page >= totalPages - 1 ? "#f8fafc" : "#fff", color: page >= totalPages - 1 ? "#cbd5e1" : "#374151", padding: "0 12px" }}
+                      >→</button>
+                    </div>
+                  );
+                })()}
               </div>
             </BlockStack>
 

@@ -11,8 +11,10 @@ import { json } from "@remix-run/node";
 import db from "../db.server";
 
 export const loader = async ({ request }: LoaderArgs) => {
-  await authenticate.admin(request);
+  const { session } = await authenticate.admin(request);
+  const shop = session.shop;
   const catalogs = await db.catalog.findMany({
+    where: { shopDomain: shop },
     select: {
       id: true, title: true, status: true,
       defaultDiscountPercent: true, autoIncludeProducts: true, segmentId: true, createdAt: true,
@@ -21,7 +23,10 @@ export const loader = async ({ request }: LoaderArgs) => {
     },
     orderBy: { createdAt: "desc" },
   });
-  const segments = await db.segment.findMany({ select: { id: true, title: true } });
+  const segments = await db.segment.findMany({
+    where: { shopDomain: shop },
+    select: { id: true, title: true },
+  });
   return json({ catalogs, segments });
 };
 
