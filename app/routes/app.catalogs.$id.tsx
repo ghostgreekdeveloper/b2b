@@ -7,7 +7,7 @@ import {
 } from "@shopify/polaris";
 import db from "../db.server";
 import { authenticate } from "../shopify.server";
-import { customerStateCache, catalogIdsCache, syncSessionCache } from "../cache.server";
+import { customerStateCache, catalogIdsCache, syncSessionCache, productMetaCache } from "../cache.server";
 import { invalidateCatalogCache } from "../catalogInvalidate.server";
 import {
   refreshCatalogCustomerMetafields,
@@ -38,46 +38,67 @@ export const loader = async ({ params, request }: LoaderArgs) => {
     where: { catalogId, applicationStatus: "ACCEPTED" },
   });
 
-  // Fetch Shopify status + collections for every unique product, batched in groups of 250
+  // Fetch Shopify status + collections — cached per catalog, parallel batches of 250
   const uniqueProductIds = [
     ...new Set(catalog.items.map((i) => i.productId.toString())),
   ];
 
   type ProductMeta = { status: string; collections: string[] };
-  const productMeta: Record<string, ProductMeta> = {};
-  let allCollections: string[] = [];
 
-  for (let bStart = 0; bStart < uniqueProductIds.length; bStart += 250) {
-    const batch = uniqueProductIds.slice(bStart, bStart + 250);
-    const productGids = batch.map((id) =>
-      id.startsWith("gid://") ? id : `gid://shopify/Product/${id}`
-    );
-    try {
-      const res = await admin.graphql(
-        `query ProductMeta($ids: [ID!]!) {
-          nodes(ids: $ids) {
-            ... on Product {
-              id
-              status
-              collections(first: 10) { nodes { title } }
-            }
-          }
-        }`,
-        { variables: { ids: productGids } }
-      );
-      const data = await res.json();
-      for (const node of (data.data?.nodes ?? []) as any[]) {
-        if (!node?.id) continue;
-        const numId = node.id.split("/").pop()!;
-        const cols: string[] = node.collections?.nodes?.map((c: any) => c.title) ?? [];
-        productMeta[numId] = { status: node.status ?? "ACTIVE", collections: cols };
-        for (const col of cols) if (!allCollections.includes(col)) allCollections.push(col);
-      }
-    } catch (e) {
-      console.error("[B2B] product meta fetch failed:", e);
+  const metaCacheKey = `meta:${shop}:${catalogId}`;
+  const cached = productMetaCache.get(metaCacheKey);
+
+  let productMeta: Record<string, ProductMeta>;
+  let allCollections: string[];
+
+  if (cached) {
+    productMeta   = cached.meta;
+    allCollections = cached.collections;
+  } else {
+    const merged: Record<string, ProductMeta> = {};
+
+    // Build batches of 250 and run ALL of them in parallel
+    const batches: string[][] = [];
+    for (let i = 0; i < uniqueProductIds.length; i += 250) {
+      batches.push(uniqueProductIds.slice(i, i + 250));
     }
+
+    await Promise.all(batches.map(async (batch) => {
+      const ids = batch.map((id) =>
+        id.startsWith("gid://") ? id : `gid://shopify/Product/${id}`
+      );
+      try {
+        const res = await admin.graphql(
+          `query ProductMeta($ids: [ID!]!) {
+            nodes(ids: $ids) {
+              ... on Product {
+                id
+                status
+                collections(first: 10) { nodes { title } }
+              }
+            }
+          }`,
+          { variables: { ids } }
+        );
+        const data = await res.json();
+        for (const node of (data.data?.nodes ?? []) as any[]) {
+          if (!node?.id) continue;
+          const numId = node.id.split("/").pop()!;
+          merged[numId] = {
+            status: node.status ?? "ACTIVE",
+            collections: node.collections?.nodes?.map((c: any) => c.title) ?? [],
+          };
+        }
+      } catch (e) {
+        console.error("[B2B] product meta fetch failed:", e);
+      }
+    }));
+
+    const cols = [...new Set(Object.values(merged).flatMap((m) => m.collections))].sort();
+    productMeta    = merged;
+    allCollections = cols;
+    productMetaCache.set(metaCacheKey, { meta: merged, collections: cols });
   }
-  allCollections.sort();
 
   const items = catalog.items.map((item) => {
     const pid = item.productId.toString();
@@ -415,6 +436,7 @@ export const action = async ({ request, params }: ActionArgs) => {
     }
 
     syncSessionCache.del(sessionId);
+    productMetaCache.del(`meta:${shop}:${catalogId}`);
     await invalidateCatalogCache(catalogId);
     refreshCatalogCustomerMetafields(admin, catalogId);
 

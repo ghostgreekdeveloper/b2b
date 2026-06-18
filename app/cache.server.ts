@@ -157,6 +157,14 @@ export const catalogDataCache = new TtlCache<CatalogData>(
   5 * 60_000  // 5 min, stale-while-revalidate keeps latency flat at expiry
 );
 
+export const productMetaCache = new TtlCache<{
+  meta:        Record<string, { status: string; collections: string[] }>;
+  collections: string[];
+}>(
+  200,
+  5 * 60_000
+);
+
 export const syncSessionCache = new TtlCache<{
   catalogId:       number;
   autoInclude:     boolean;
