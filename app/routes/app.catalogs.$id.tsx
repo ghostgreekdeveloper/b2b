@@ -29,7 +29,7 @@ export const loader = async ({ params, request }: LoaderArgs) => {
   if (!catalog) throw new Response("Catalog not found", { status: 404 });
 
   const segments = await db.segment.findMany({
-    where: { shopDomain: shop },
+    where: { shopDomain: { in: [shop, ""] } },
     select: { id: true, title: true },
     orderBy: { title: "asc" },
   });
@@ -1009,6 +1009,17 @@ export default function CatalogDetailPage() {
             }}>
               <span style={{ fontSize: 16 }}>✓</span>
               <span style={{ fontSize: 13.5, fontWeight: 500 }}>Catalog saved. Customer pricing updated instantly.</span>
+            </div>
+          )}
+          {/* ── Background import notice (just created with auto-include) ── */}
+          {!isSyncing && catalog.autoIncludeProducts && catalog.items.length === 0 && (
+            <div style={{
+              background: "#fefce8", border: "1px solid #fde047", borderRadius: 10,
+              padding: "12px 16px", color: "#854d0e", fontSize: 13,
+            }}>
+              <strong>Products are being imported in the background.</strong>
+              {" "}This catalog was created with auto-include — your Shopify products are loading now.
+              Refresh the page in a moment to see them, or click <strong>Sync</strong> below to run a fresh import.
             </div>
           )}
           {/* ── Sync progress banner ───────────────────────────────────── */}

@@ -24,7 +24,7 @@ export const loader = async ({ request }: LoaderArgs) => {
     orderBy: { createdAt: "desc" },
   });
   const segments = await db.segment.findMany({
-    where: { shopDomain: shop },
+    where: { shopDomain: { in: [shop, ""] } },
     select: { id: true, title: true },
   });
   return json({ catalogs, segments });
@@ -60,6 +60,15 @@ export const action = async ({ request }: ActionArgs) => {
 
   const segmentIdRaw = formData.get("segmentId")?.toString() || null;
 
+  // Which Shopify product statuses to import (sent from the create modal)
+  const importStatuses = (formData.get("importStatuses")?.toString() ?? "ACTIVE").split(",").filter(Boolean);
+  const wantActive = importStatuses.includes("ACTIVE");
+  const wantDraft  = importStatuses.includes("DRAFT");
+  const statusGqlQuery =
+    wantActive && wantDraft ? null
+    : wantDraft  ? "status:draft"
+    : "status:active";
+
   const newCatalog = await db.catalog.create({
     data: {
       shopDomain: session.shop, title, tag: "",
@@ -70,49 +79,57 @@ export const action = async ({ request }: ActionArgs) => {
     },
   });
 
+  // Fire-and-forget background import so creation returns instantly.
+  // The user can see progress on the catalog page or click Sync for a fresh run.
   if (autoIncludeProducts) {
-    const allProducts: any[] = [];
-    let cursor: string | null = null;
-    let hasNextPage = true;
-    while (hasNextPage) {
-      const res = await admin.graphql(
-        `#graphql
-        query GetProducts($cursor: String) {
-          products(first: 250, after: $cursor) {
-            pageInfo { hasNextPage endCursor }
-            edges { node {
-              id title featuredImage { url }
-              variants(first: 100) { edges { node { id sku price image { url } } } }
-            } }
-          }
-        }`,
-        { variables: { cursor } }
-      );
-      const data = await res.json();
-      const products = data?.data?.products;
-      allProducts.push(...(products?.edges ?? []).map((e: any) => e.node));
-      hasNextPage = products?.pageInfo?.hasNextPage ?? false;
-      cursor = products?.pageInfo?.endCursor ?? null;
-    }
-    const catalogItemsData = allProducts.flatMap((product: any) =>
-      (product.variants?.edges ?? []).map((ve: any) => {
-        const v = ve.node;
-        return {
-          catalogId: newCatalog.id,
-          productId: product.id.replace("gid://shopify/Product/", ""),
-          variantId: v.id.replace("gid://shopify/ProductVariant/", ""),
-          sku: v.sku || undefined,
-          name: product.title || "Unnamed Product",
-          img: v.image?.url || product.featuredImage?.url || "",
-          customPriceCents: v.price ? Math.round(parseFloat(v.price) * 100) : undefined,
-          customDiscountPercent: null,
-        };
-      })
-    );
-    if (catalogItemsData.length > 0) await db.catalogItem.createMany({ data: catalogItemsData });
+    (async () => {
+      try {
+        let cursor: string | null = null;
+        let hasNextPage = true;
+        while (hasNextPage) {
+          const res = await admin.graphql(
+            `#graphql
+            query GetProducts($cursor: String, $query: String) {
+              products(first: 250, after: $cursor, query: $query) {
+                pageInfo { hasNextPage endCursor }
+                edges { node {
+                  id title status featuredImage { url }
+                  variants(first: 100) { edges { node { id sku price image { url } } } }
+                } }
+              }
+            }`,
+            { variables: { cursor, query: statusGqlQuery } }
+          );
+          const data = await res.json();
+          const products = data?.data?.products;
+          const nodes: any[] = (products?.edges ?? []).map((e: any) => e.node);
+          const items = nodes.flatMap((product: any) =>
+            (product.variants?.edges ?? []).map((ve: any) => {
+              const v = ve.node;
+              return {
+                catalogId: newCatalog.id,
+                productId: product.id.replace("gid://shopify/Product/", ""),
+                variantId: v.id.replace("gid://shopify/ProductVariant/", ""),
+                sku: v.sku || undefined,
+                name: product.title || "Unnamed Product",
+                img: v.image?.url || product.featuredImage?.url || "",
+                customPriceCents: v.price ? Math.round(parseFloat(v.price) * 100) : undefined,
+                customDiscountPercent: null,
+              };
+            })
+          );
+          if (items.length > 0) await db.catalogItem.createMany({ data: items });
+          hasNextPage = products?.pageInfo?.hasNextPage ?? false;
+          cursor = products?.pageInfo?.endCursor ?? null;
+        }
+        console.log(`[B2B] auto-import complete for catalog ${newCatalog.id}`);
+      } catch (e) {
+        console.error("[B2B] auto-import failed:", e);
+      }
+    })();
   }
 
-  return json({ catalog: newCatalog });
+  return json({ catalog: newCatalog, importing: autoIncludeProducts });
 };
 
 // ── Status styles ─────────────────────────────────────────────────────────────
@@ -135,6 +152,8 @@ export default function CatalogsListPage() {
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [newTitle, setNewTitle]         = useState("");
   const [autoInclude, setAutoInclude]   = useState(false);
+  const [importActive, setImportActive] = useState(true);
+  const [importDraft,  setImportDraft]  = useState(false);
   const [discountType, setDiscountType] = useState("PERCENT");
   const [priceDisplay, setPriceDisplay] = useState("REPLACED");
   const [fixedDiscountAmount, setFixedDiscountAmount] = useState("");
@@ -163,10 +182,12 @@ export default function CatalogsListPage() {
   };
 
   const create = () => {
+    const importStatuses = [importActive && "ACTIVE", importDraft && "DRAFT"].filter(Boolean).join(",") || "ACTIVE";
     fetcher.submit(
       {
         title: newTitle || "New Catalog",
         autoIncludeProducts: autoInclude ? "on" : "",
+        importStatuses,
         discountType,
         priceDisplay,
         segmentId: newSegmentId,
@@ -176,7 +197,7 @@ export default function CatalogsListPage() {
       { method: "post" }
     );
     setModalOpen(false);
-    setNewTitle(""); setAutoInclude(false);
+    setNewTitle(""); setAutoInclude(false); setImportActive(true); setImportDraft(false);
     setDiscountType("PERCENT"); setPriceDisplay("REPLACED");
     setFixedDiscountAmount(""); setFixedPriceAmount(""); setPercentAmount("");
     setNewSegmentId("");
@@ -594,10 +615,24 @@ export default function CatalogsListPage() {
             <Divider />
             <Checkbox
               label="Auto-include all existing products"
-              helpText="Imports all Shopify products into this catalog immediately."
+              helpText="Imports all Shopify products into this catalog in the background. You can open the catalog immediately while it loads."
               checked={autoInclude}
               onChange={setAutoInclude}
             />
+            {autoInclude && (
+              <div style={{ marginLeft: 24, marginTop: 8, display: "flex", gap: 12 }}>
+                <Checkbox
+                  label="Active products"
+                  checked={importActive}
+                  onChange={setImportActive}
+                />
+                <Checkbox
+                  label="Draft products"
+                  checked={importDraft}
+                  onChange={setImportDraft}
+                />
+              </div>
+            )}
           </BlockStack>
         </Modal.Section>
       </Modal>
