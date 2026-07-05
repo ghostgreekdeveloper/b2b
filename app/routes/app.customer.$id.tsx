@@ -112,6 +112,41 @@ export const loader = async ({ params, request }: LoaderFunctionArgs) => {
         })) as any[]).map((c) => ({ id: Number(c.id), title: c.title as string, status: c.status as string }))
       : [];
 
+  // Self-heal: if this ACCEPTED customer has no catalog yet, try to enroll them now
+  // based on their current Shopify tags. Covers the case where admin added the tag
+  // in Shopify after the customer was already approved, without visiting the catalog page.
+  if (customer.applicationStatus === "ACCEPTED" && assignedCatalogs.length === 0 && customerTags.length > 0) {
+    try {
+      const segments = await db.segment.findMany({
+        where: { status: "Active" }, select: { id: true, customercondition: true },
+      });
+      const matchedSegments = segments.filter((s) => {
+        const cond = s.customercondition ?? "";
+        if (cond.startsWith("domain:") || cond.startsWith("customers:") || cond.startsWith("shopify_segment:")) return false;
+        const tag = cond.startsWith("tag:") ? cond.slice(4) : cond;
+        return customerTags.includes(tag);
+      });
+      const toEnroll: number[] = [];
+      for (const seg of matchedSegments) {
+        const cats = await db.catalog.findMany({
+          where: { segmentId: seg.id, status: "active" }, select: { id: true },
+        });
+        cats.forEach((c: any) => { const cid = Number(c.id); if (!toEnroll.includes(cid)) toEnroll.push(cid); });
+      }
+      if (toEnroll.length > 0) {
+        const numId = id.includes("/") ? id.split("/").pop()! : id;
+        for (const catId of toEnroll) {
+          await db.$executeRaw`INSERT INTO customer_catalogs ("customerId", "catalogId") VALUES (${numId}, ${catId}) ON CONFLICT DO NOTHING`;
+        }
+        await db.customers.updateMany({ where: { id: numId, catalogId: null }, data: { catalogId: toEnroll[0] } });
+        writeCustomerDiscountMetafield(admin, numId, customer.shopDomain).catch(() => {});
+        console.log(`[B2B] self-healed enrollment for ${numId} into catalogs [${toEnroll}]`);
+      }
+    } catch (err) {
+      console.error("[B2B] self-heal enrollment error:", err);
+    }
+  }
+
   return json({ customer, autoSegment, autoCatalogs, assignedCatalogs, customerTags, segmentTags });
 };
 
@@ -230,37 +265,56 @@ export const action = async ({ params, request }: ActionFunctionArgs) => {
     updateData.applicationStatus = "ACCEPTED";
     try {
       const numericId = id.includes("/") ? id.split("/").pop()! : id;
-      const res = await admin.graphql(
-        `query { customer(id: "gid://shopify/Customer/${numericId}") { tags } }`
+      const customerGid = `gid://shopify/Customer/${numericId}`;
+
+      // Fetch current tags
+      const tagRes = await admin.graphql(
+        `query { customer(id: "${customerGid}") { tags } }`
       );
-      const data = await res.json();
-      const tags: string[] = data?.data?.customer?.tags ?? [];
-      if (tags.length) {
-        const segments = await db.segment.findMany({
-          where: { status: "Active" },
-          select: { id: true, customercondition: true },
+      const existingTags: string[] = (await tagRes.json())?.data?.customer?.tags ?? [];
+
+      // Find all active catalogs with tag-based segments for this shop
+      const segments = await db.segment.findMany({
+        where: { status: "Active" },
+        select: { id: true, customercondition: true },
+      });
+
+      // Collect which tags need to be added and which catalogs to enroll in
+      const tagsToAdd: string[] = [];
+      const assignedIds: number[] = [];
+
+      for (const seg of segments) {
+        const cond = seg.customercondition ?? "";
+        if (cond.startsWith("domain:") || cond.startsWith("customers:") || cond.startsWith("shopify_segment:")) continue;
+        const tag = cond.startsWith("tag:") ? cond.slice(4) : cond;
+        if (!tag) continue;
+
+        const cats = await db.catalog.findMany({
+          where: { segmentId: seg.id, status: "active", shopDomain: shop },
+          select: { id: true },
         });
-        const matchedSegments = segments.filter((s) => {
-          const cond = s.customercondition ?? "";
-          if (cond.startsWith("domain:")) return false;
-          const tag = cond.startsWith("tag:") ? cond.slice(4) : cond;
-          return tags.includes(tag);
-        });
-        const assignedIds: number[] = [];
-        for (const seg of matchedSegments) {
-          const cats = await db.catalog.findMany({
-            where: { segmentId: seg.id, status: "active" },
-            select: { id: true },
-          });
-          cats.forEach((c: any) => { if (!assignedIds.includes(c.id)) assignedIds.push(c.id); });
+        if (!cats.length) continue;
+
+        // Push tag to Shopify if customer doesn't have it yet
+        if (!existingTags.includes(tag) && !tagsToAdd.includes(tag)) tagsToAdd.push(tag);
+        cats.forEach((c: any) => { if (!assignedIds.includes(c.id)) assignedIds.push(c.id); });
+      }
+
+      // Add missing tags to customer in Shopify
+      if (tagsToAdd.length > 0) {
+        await admin.graphql(
+          `mutation TagAdd($id: ID!, $tags: [String!]!) { tagsAdd(id: $id, tags: $tags) { userErrors { message } } }`,
+          { variables: { id: customerGid, tags: tagsToAdd } }
+        );
+        console.log(`[B2B] pushed tags ${JSON.stringify(tagsToAdd)} to ${customerGid} on approve`);
+      }
+
+      if (assignedIds.length > 0) {
+        await db.$executeRaw`DELETE FROM customer_catalogs WHERE "customerId" = ${id}`;
+        for (const catId of assignedIds) {
+          await db.$executeRaw`INSERT INTO customer_catalogs ("customerId", "catalogId") VALUES (${id}, ${catId}) ON CONFLICT DO NOTHING`;
         }
-        if (assignedIds.length > 0) {
-          await db.$executeRaw`DELETE FROM customer_catalogs WHERE "customerId" = ${id}`;
-          for (const catId of assignedIds) {
-            await db.$executeRaw`INSERT INTO customer_catalogs ("customerId", "catalogId") VALUES (${id}, ${catId}) ON CONFLICT DO NOTHING`;
-          }
-          updateData.catalogId = assignedIds[0];
-        }
+        updateData.catalogId = assignedIds[0];
       }
     } catch (err) {
       console.error("[B2B] auto-assign catalog failed:", err);
