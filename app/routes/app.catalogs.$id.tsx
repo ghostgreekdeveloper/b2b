@@ -515,7 +515,7 @@ export const action = async ({ request, params }: ActionArgs) => {
   // ── Save settings ─────────────────────────────────────────────────────────
   const prevCatalog = await db.catalog.findUnique({
     where: { id: catalogId },
-    select: { status: true, shopDomain: true },
+    select: { status: true, shopDomain: true, segmentId: true },
   });
 
   const newStatus            = formData.get("status")?.toString()               ?? null;
@@ -586,6 +586,22 @@ export const action = async ({ request, params }: ActionArgs) => {
   updateData.cacheVersion = { increment: 1 };
   await db.catalog.update({ where: { id: catalogId }, data: updateData });
 
+  // If the segment was removed or changed, wipe stale junction-table rows so the
+  // customer count reflects reality immediately.
+  const newSegmentId = segmentId !== null ? (segmentId || null) : prevCatalog?.segmentId ?? null;
+  if (prevCatalog?.segmentId && prevCatalog.segmentId !== newSegmentId) {
+    await db.$executeRaw`DELETE FROM customer_catalogs WHERE "catalogId" = ${catalogId}`;
+    // Also clear the legacy FK for customers whose only catalog was this one
+    await db.$executeRaw`
+      UPDATE "Customers" SET "catalogId" = NULL
+      WHERE "catalogId" = ${catalogId}
+        AND NOT EXISTS (
+          SELECT 1 FROM customer_catalogs cc WHERE cc."customerId" = "Customers".id
+        )
+    `;
+    clearCatalogCustomerMetafields(admin, catalogId);
+  }
+
   // Batch price changes submitted alongside settings save
   const priceChangesJson = formData.get("priceChanges")?.toString();
   if (priceChangesJson) {
@@ -609,8 +625,10 @@ export const action = async ({ request, params }: ActionArgs) => {
 
   const deactivated =
     newStatus !== null && newStatus !== "active" && prevCatalog?.status === "active";
-  if (deactivated) {
-    clearCatalogCustomerMetafields(admin, catalogId);
+  const segmentRemoved = !!(prevCatalog?.segmentId && prevCatalog.segmentId !== newSegmentId);
+  if (deactivated || segmentRemoved) {
+    // metafields already cleared above for segment removal; clear again on deactivation
+    if (deactivated) clearCatalogCustomerMetafields(admin, catalogId);
   } else {
     refreshCatalogCustomerMetafields(admin, catalogId);
   }
