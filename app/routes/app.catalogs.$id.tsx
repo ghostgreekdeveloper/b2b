@@ -27,16 +27,41 @@ async function _autoEnrollBySegment(
   const tagName = cond.startsWith("tag:") ? cond.slice(4) : cond;
   if (!tagName) return;
 
-  const res = await admin.graphql(
+  // ── Path 1: Shopify-first — find customers who already have the tag ────────
+  const tagRes = await admin.graphql(
     `query AutoEnroll($q: String!) { customers(first: 250, query: $q) { nodes { id } } }`,
     { variables: { q: `tag:${tagName}` } }
   );
-  const shopifyIds: string[] = ((await res.json())?.data?.customers?.nodes ?? [])
+  const taggedShopifyIds: string[] = ((await tagRes.json())?.data?.customers?.nodes ?? [])
     .map((n: any) => (n.id as string).replace("gid://shopify/Customer/", ""));
-  if (!shopifyIds.length) return;
 
+  // ── Path 2: DB-first — find ACCEPTED customers who don't have the tag yet ──
+  // These are customers approved in the B2B app but never tagged in Shopify.
+  // Push the segment tag to them so future queries also find them correctly.
+  const allAccepted = await db.customers.findMany({
+    where: { applicationStatus: "ACCEPTED", shopDomain: shop },
+    select: { id: true },
+  });
+  const taggedSet = new Set(taggedShopifyIds);
+  const needsTag = allAccepted.filter((c) => !taggedSet.has(c.id));
+
+  if (needsTag.length > 0) {
+    // Add tag in Shopify for each untagged ACCEPTED customer (batched, fire-and-forget errors)
+    await Promise.allSettled(
+      needsTag.map((c) =>
+        admin.graphql(
+          `mutation TagAdd($id: ID!, $tags: [String!]!) { tagsAdd(id: $id, tags: $tags) { userErrors { message } } }`,
+          { variables: { id: `gid://shopify/Customer/${c.id}`, tags: [tagName] } }
+        )
+      )
+    );
+    console.log(`[B2B] pushed tag "${tagName}" to ${needsTag.length} untagged ACCEPTED customer(s)`);
+  }
+
+  // Union: everyone who has (or just got) the tag AND is ACCEPTED in DB
+  const allCandidateIds = [...new Set([...taggedShopifyIds, ...needsTag.map((c) => c.id)])];
   const accepted = await db.customers.findMany({
-    where: { id: { in: shopifyIds }, applicationStatus: "ACCEPTED", shopDomain: shop },
+    where: { id: { in: allCandidateIds }, applicationStatus: "ACCEPTED", shopDomain: shop },
     select: { id: true },
   });
   if (!accepted.length) return;
@@ -53,7 +78,6 @@ async function _autoEnrollBySegment(
       INSERT INTO customer_catalogs ("customerId", "catalogId")
       VALUES (${c.id}, ${catalogId}) ON CONFLICT DO NOTHING
     `;
-    // Also set legacy FK if not yet assigned so catalog-page count stays in sync
     await db.customers.updateMany({
       where: { id: c.id, catalogId: null },
       data: { catalogId },
