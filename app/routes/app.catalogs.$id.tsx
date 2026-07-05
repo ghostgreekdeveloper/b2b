@@ -16,6 +16,54 @@ import {
 
 const PAGE_SIZE = 50;
 
+async function _autoEnrollBySegment(
+  admin: any, shop: string, catalogId: number, segmentId: string
+): Promise<void> {
+  const segment = await db.segment.findUnique({
+    where: { id: segmentId }, select: { customercondition: true },
+  });
+  const cond = (segment?.customercondition as string | null) ?? "";
+  if (!cond || cond.startsWith("domain:") || cond.startsWith("customers:") || cond.startsWith("shopify_segment:")) return;
+  const tagName = cond.startsWith("tag:") ? cond.slice(4) : cond;
+  if (!tagName) return;
+
+  const res = await admin.graphql(
+    `query AutoEnroll($q: String!) { customers(first: 250, query: $q) { nodes { id } } }`,
+    { variables: { q: `tag:${tagName}` } }
+  );
+  const shopifyIds: string[] = ((await res.json())?.data?.customers?.nodes ?? [])
+    .map((n: any) => (n.id as string).replace("gid://shopify/Customer/", ""));
+  if (!shopifyIds.length) return;
+
+  const accepted = await db.customers.findMany({
+    where: { id: { in: shopifyIds }, applicationStatus: "ACCEPTED", shopDomain: shop },
+    select: { id: true },
+  });
+  if (!accepted.length) return;
+
+  const existing = await db.$queryRaw<{ customerId: string }[]>`
+    SELECT "customerId" FROM customer_catalogs WHERE "catalogId" = ${catalogId}
+  `;
+  const existingSet = new Set(existing.map((r) => String(r.customerId)));
+  const toAdd = accepted.filter((c) => !existingSet.has(c.id));
+  if (!toAdd.length) return;
+
+  for (const c of toAdd) {
+    await db.$executeRaw`
+      INSERT INTO customer_catalogs ("customerId", "catalogId")
+      VALUES (${c.id}, ${catalogId}) ON CONFLICT DO NOTHING
+    `;
+    // Also set legacy FK if not yet assigned so catalog-page count stays in sync
+    await db.customers.updateMany({
+      where: { id: c.id, catalogId: null },
+      data: { catalogId },
+    });
+  }
+
+  refreshCatalogCustomerMetafields(admin, catalogId);
+  console.log(`[B2B] auto-enrolled ${toAdd.length} customer(s) into catalog ${catalogId} via tag "${tagName}"`);
+}
+
 // ── Loader ────────────────────────────────────────────────────────────────────
 export const loader = async ({ params, request }: LoaderArgs) => {
   const { admin, session } = await authenticate.admin(request);
@@ -34,9 +82,15 @@ export const loader = async ({ params, request }: LoaderArgs) => {
     orderBy: { title: "asc" },
   });
 
-  const assignedCustomerCount = await db.customers.count({
-    where: { catalogId, applicationStatus: "ACCEPTED" },
-  });
+  const countResult = await db.$queryRaw<{ count: bigint }[]>`
+    SELECT COUNT(DISTINCT c.id) as count FROM customers c
+    WHERE c."applicationStatus" = 'ACCEPTED' AND c."shopDomain" = ${shop}
+      AND (
+        c."catalogId" = ${catalogId}
+        OR EXISTS (SELECT 1 FROM customer_catalogs cc WHERE cc."customerId" = c.id AND cc."catalogId" = ${catalogId})
+      )
+  `;
+  const assignedCustomerCount = Number(countResult[0]?.count ?? 0);
 
   // Fetch Shopify status + collections — cached per catalog, parallel batches of 250
   const uniqueProductIds = [
@@ -125,6 +179,14 @@ export const loader = async ({ params, request }: LoaderArgs) => {
     fixedPriceCents: number | null; priceDisplay: string;
   }[]>`SELECT "discountType", "fixedDiscountCents", "fixedPriceCents", "priceDisplay" FROM "Catalog" WHERE id = ${catalogId}`;
   const extra = rawExtra[0] ?? { discountType: "PERCENT", fixedDiscountCents: null, fixedPriceCents: null, priceDisplay: "REPLACED" };
+
+  // Fire-and-forget: auto-enroll existing ACCEPTED customers who match the segment tag.
+  // Runs every page load; ON CONFLICT DO NOTHING makes it idempotent.
+  if (catalog.segmentId) {
+    _autoEnrollBySegment(admin, shop, catalogId, catalog.segmentId).catch((e) =>
+      console.error("[B2B] autoEnroll error:", e)
+    );
+  }
 
   return json({
     catalog: {

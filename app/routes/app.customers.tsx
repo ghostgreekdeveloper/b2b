@@ -5,6 +5,7 @@ import type { LoaderFunctionArgs, ActionFunctionArgs } from "@remix-run/node";
 import { Page, BlockStack } from "@shopify/polaris";
 import { authenticate } from "../shopify.server";
 import db from "../db.server";
+import { writeCustomerDiscountMetafield } from "../writeCustomerMetafield.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
@@ -67,6 +68,42 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         }
         Promise.allSettled(mutations).catch(() => {});
       }
+    }
+
+    // Fetch tags and auto-assign catalogs — same logic as the approve intent
+    try {
+      const tagsRes = await admin.graphql(
+        `query { customer(id: "gid://shopify/Customer/${customerId}") { tags } }`
+      );
+      const tags: string[] = (await tagsRes.json())?.data?.customer?.tags ?? [];
+      if (tags.length) {
+        const segments = await db.segment.findMany({
+          where: { status: "Active" }, select: { id: true, customercondition: true },
+        });
+        const matchedSegments = segments.filter((s) => {
+          const cond = s.customercondition ?? "";
+          if (cond.startsWith("domain:") || cond.startsWith("customers:") || cond.startsWith("shopify_segment:")) return false;
+          const tag = cond.startsWith("tag:") ? cond.slice(4) : cond;
+          return tags.includes(tag);
+        });
+        const assignedIds: number[] = [];
+        for (const seg of matchedSegments) {
+          const cats = await db.catalog.findMany({
+            where: { segmentId: seg.id, status: "active" }, select: { id: true },
+          });
+          cats.forEach((c: any) => { const id = Number(c.id); if (!assignedIds.includes(id)) assignedIds.push(id); });
+        }
+        if (assignedIds.length > 0) {
+          await db.$executeRaw`DELETE FROM customer_catalogs WHERE "customerId" = ${customerId}`;
+          for (const catId of assignedIds) {
+            await db.$executeRaw`INSERT INTO customer_catalogs ("customerId", "catalogId") VALUES (${customerId}, ${catId}) ON CONFLICT DO NOTHING`;
+          }
+          await db.customers.updateMany({ where: { id: customerId, catalogId: null }, data: { catalogId: assignedIds[0] } });
+          writeCustomerDiscountMetafield(admin, customerId, shop).catch(() => {});
+        }
+      }
+    } catch (err) {
+      console.error("[B2B] add-customer auto-assign failed:", err);
     }
 
     return json({ added: { id: customerId, firstName: node.firstName, lastName: node.lastName, email: node.email } });
