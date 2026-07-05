@@ -471,9 +471,9 @@ export const action = async ({ request, params }: ActionArgs) => {
       sessionId,
       hasNextPage:  page.pageInfo.hasNextPage,
       nextCursor:   page.pageInfo.endCursor,
-      processed:    session.seenVariantGids.length,
-      added:        session.added,
-      updated:      session.updated,
+      processed:    syncSess.seenVariantGids.length,
+      added:        syncSess.added,
+      updated:      syncSess.updated,
       delayMs,
     });
   }
