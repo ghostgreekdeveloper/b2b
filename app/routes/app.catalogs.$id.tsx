@@ -83,7 +83,7 @@ export const loader = async ({ params, request }: LoaderArgs) => {
   });
 
   const countResult = await db.$queryRaw<{ count: bigint }[]>`
-    SELECT COUNT(DISTINCT c.id) as count FROM customers c
+    SELECT COUNT(DISTINCT c.id) as count FROM "Customers" c
     WHERE c."applicationStatus" = 'ACCEPTED' AND c."shopDomain" = ${shop}
       AND (
         c."catalogId" = ${catalogId}
