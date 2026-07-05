@@ -549,7 +549,21 @@ export const action = async ({ request, params }: ActionArgs) => {
 
     if (catalogDiscountType === "PERCENT") {
       updateData.defaultDiscountPercent = discount;
-      if (applyToAll) {
+      if (applyToAll && discount > 0) {
+        // Store computed wholesale cents for items that have a base price.
+        // Items with null customPriceCents (never synced) keep null — they fall
+        // back to the proxy's defaultPct field which the JS applies via DOM price.
+        const factor = (100 - discount) / 100;
+        await db.$executeRaw`
+          UPDATE "CatalogItem"
+          SET "customDiscountPercent" = CASE
+            WHEN "customPriceCents" IS NOT NULL AND "customPriceCents" > 0
+              THEN ROUND("customPriceCents"::numeric * ${factor}::numeric)
+            ELSE NULL
+          END
+          WHERE "catalogId" = ${catalogId}
+        `;
+      } else if (applyToAll) {
         await db.catalogItem.updateMany({ where: { catalogId }, data: { customDiscountPercent: null } });
       }
     } else if (catalogDiscountType === "FIXED_AMOUNT") {
@@ -600,6 +614,12 @@ export const action = async ({ request, params }: ActionArgs) => {
         )
     `;
     clearCatalogCustomerMetafields(admin, catalogId);
+    // Immediately enroll customers that match the new segment tag
+    if (newSegmentId) {
+      _autoEnrollBySegment(admin, shop, catalogId, newSegmentId).catch((e) =>
+        console.error("[B2B] autoEnroll on segment change error:", e)
+      );
+    }
   }
 
   // Batch price changes submitted alongside settings save

@@ -215,6 +215,8 @@ export const loader = async ({ request }: any) => {
   let globalFixedOffDisplay   = "REPLACED";
   let globalFixedPrice        = 0;
   let globalFixedPriceDisplay = "REPLACED";
+  let globalDefaultPct        = 0;
+  let globalDefaultPctDisplay = "REPLACED";
 
   for (let ci = 0; ci < catalogEntries.length; ci++) {
     const entry = catalogEntries[ci];
@@ -239,6 +241,10 @@ export const loader = async ({ request }: any) => {
       if (fp > 0 && (globalFixedPrice === 0 || fp < globalFixedPrice)) {
         globalFixedPrice = fp; globalFixedPriceDisplay = entry.priceDisplay;
       }
+    }
+    if (entry.discountType === "PERCENT") {
+      const pct = entry.defaultDiscountPercent ?? 0;
+      if (pct > globalDefaultPct) { globalDefaultPct = pct; globalDefaultPctDisplay = entry.priceDisplay; }
     }
 
     // O(k) — iterate the requested IDs, not the catalog
@@ -280,8 +286,9 @@ export const loader = async ({ request }: any) => {
     minimumOrderMessage,
     priceDisplay:        priceDisplay ?? "REPLACED",
     ...(Object.keys(fixedOffVariants).length > 0 ? { fixedOffVariants }                                                        : {}),
-    ...(globalFixedOff   > 0 ? { fixedOff:    globalFixedOff,   fixedOffPriceDisplay:   globalFixedOffDisplay }   : {}),
-    ...(globalFixedPrice > 0 ? { fixedPrice:  globalFixedPrice, fixedPricePriceDisplay: globalFixedPriceDisplay } : {}),
+    ...(globalFixedOff   > 0 ? { fixedOff:       globalFixedOff,   fixedOffPriceDisplay:   globalFixedOffDisplay }   : {}),
+    ...(globalFixedPrice > 0 ? { fixedPrice:     globalFixedPrice, fixedPricePriceDisplay: globalFixedPriceDisplay } : {}),
+    ...(globalDefaultPct > 0 ? { defaultPct:     globalDefaultPct, defaultPctPriceDisplay: globalDefaultPctDisplay } : {}),
   });
 };
 

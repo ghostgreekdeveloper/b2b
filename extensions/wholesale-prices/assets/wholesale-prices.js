@@ -200,6 +200,8 @@
   var globalFixedOffDisplay    = 'REPLACED';
   var globalFixedPrice         = 0;
   var globalFixedPriceDisplay  = 'REPLACED';
+  var globalDefaultPct         = 0;
+  var globalDefaultPctDisplay  = 'REPLACED';
 
   var minimumOrderCents           = 0;
   var minimumOrderFetched         = false;
@@ -260,6 +262,10 @@
         if (data.fixedPrice > 0) {
           globalFixedPrice        = data.fixedPrice;
           globalFixedPriceDisplay = data.fixedPricePriceDisplay || 'REPLACED';
+        }
+        if (data.defaultPct > 0) {
+          globalDefaultPct        = data.defaultPct;
+          globalDefaultPctDisplay = data.defaultPctPriceDisplay || 'REPLACED';
         }
 
         if (Array.isArray(data.products)) {
@@ -703,6 +709,14 @@
         } else if (globalFixedPrice > 0) {
           var origC = readCurrentPriceCents(container);
           bestEntry = { wholesalePriceCents: globalFixedPrice, originalPriceCents: origC, priceDisplay: globalFixedPriceDisplay };
+        } else if (globalDefaultPct > 0) {
+          var domBase = readCurrentPriceCents(container);
+          if (domBase > 0) {
+            var pctPrice = Math.round(domBase * (1 - globalDefaultPct / 100));
+            if (pctPrice > 0 && pctPrice < domBase) {
+              bestEntry = { wholesalePriceCents: pctPrice, originalPriceCents: domBase, priceDisplay: globalDefaultPctDisplay };
+            }
+          }
         }
       }
 
