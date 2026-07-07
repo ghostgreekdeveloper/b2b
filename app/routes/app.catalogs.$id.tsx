@@ -954,6 +954,8 @@ export default function CatalogDetailPage() {
     if (fetcher.data?.success && fetcher.data.intent === "save") {
       setUnsaved(false);
       setDirtyPrices({});
+      setLocalPrices({});
+      navigate(window.location.pathname, { replace: true });
     }
   }, [fetcher.data]);
 
