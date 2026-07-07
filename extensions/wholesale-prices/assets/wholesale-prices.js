@@ -268,16 +268,13 @@
           globalDefaultPctDisplay = data.defaultPctPriceDisplay || 'REPLACED';
         }
 
-        // ── DIAGNOSTIC: log everything the proxy returned ────────────────────
-        console.log('[B2B] proxy raw response:', JSON.stringify({
-          products:     (data.products || []).length,
-          defaultPct:   data.defaultPct,
-          fixedOff:     data.fixedOff,
-          fixedPrice:   data.fixedPrice,
-          priceDisplay: data.priceDisplay,
-          minimumOrder: data.minimumOrderCents,
-          keys:         Object.keys(data),
-        }));
+        // ── Diagnostic: log full proxy response so we can see what came back ────
+        console.log('[B2B] proxy response keys:', Object.keys(data).join(','),
+          '| products:', (data.products || []).length,
+          '| defaultPct:', data.defaultPct,
+          '| fixedOff:', data.fixedOff,
+          '| fixedPrice:', data.fixedPrice
+        );
 
         if (Array.isArray(data.products)) {
           var added = 0;
@@ -738,19 +735,6 @@
     });
     if (roots.length > 0) {
       console.log('[B2B] applied ' + applied + '/' + roots.length + ' prices | theme=' + themeName);
-      if (applied === 0 && roots.length > 0) {
-        // Sample the first container to diagnose why nothing was applied
-        var sample = roots[0];
-        var sampleContainer = getContainer(sample);
-        var sampleVid = getVariantIdFor(sample);
-        var sampleDomPrice = sampleContainer ? readCurrentPriceCents(sampleContainer) : 0;
-        console.warn('[B2B] DIAGNOSTIC — no prices applied. globalDefaultPct=' + globalDefaultPct
-          + ' | sampleVariantId=' + sampleVid
-          + ' | sampleDomPriceCents=' + sampleDomPrice
-          + ' | priceRootSel=' + T.priceRootSel
-          + ' | regularAmtSel=' + T.regularAmtSel
-          + ' | inPriceMap=' + (sampleVid ? !!priceMap[sampleVid] : 'n/a'));
-      }
     }
   }
 

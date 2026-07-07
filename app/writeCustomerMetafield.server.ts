@@ -184,10 +184,13 @@ export async function writeCustomerDiscountMetafield(
   if (firstCatalog.minimumOrderMessage)  payload.msg = firstCatalog.minimumOrderMessage;
 
   const value = JSON.stringify(payload);
-  await _writeMetafield(admin, customerGid, value);
   console.log(
-    `[B2B] metafield written → ${customerGid} | ${Object.keys(v).length} explicit prices + ${defaultPct}% default | ${catalogs.length} catalogs | ${value.length} bytes`
+    `[B2B] writing metafield → ${customerGid} | catalogIds=${JSON.stringify(catalogIds)}` +
+    ` | catalogs=${catalogs.map((c: any) => `${c.id}(pct=${c.defaultDiscountPercent},items=${c.items.length})`).join(",")}` +
+    ` | defaultPct=${defaultPct} | explicitPrices=${Object.keys(v).length} | payload=${value}`
   );
+  await _writeMetafield(admin, customerGid, value);
+  console.log(`[B2B] metafield written OK → ${customerGid}`);
 }
 
 export async function clearCustomerDiscountMetafield(
