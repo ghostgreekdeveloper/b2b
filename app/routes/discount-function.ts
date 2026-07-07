@@ -1,20 +1,17 @@
 /**
  * Called by the Shopify Function (fetch phase) at checkout.
- * Receives only the variants in the customer's cart — loads ONLY those rows
- * from the DB instead of the entire catalog.
+ * Queries only the variants in the customer's cart — never loads the full catalog.
  *
  * POST body: { customerId: string, cartItems: [{ variantId, productId, quantity }] }
+ * Response:  { discounts, defaultPct, defaultLabel, fixedPrice, fixedPriceLabel }
  */
 
 import { json } from "@remix-run/node";
 import db from "../db.server";
-import { buildDiscountMapFromItems } from "../customerserver.server";
 
 const NUMERIC_ID_RE = /^\d{1,20}$/;
 
-export const loader = async () => {
-  return json({ error: "Use POST" }, { status: 405 });
-};
+export const loader = async () => json({ error: "Use POST" }, { status: 405 });
 
 export const action = async ({ request }: any) => {
   try {
@@ -31,91 +28,153 @@ export const action = async ({ request }: any) => {
 
     if (!NUMERIC_ID_RE.test(numericId)) return json({ discounts: [] });
 
-    const customer = await db.customers.findUnique({
+    const customer = await db.customers.findFirst({
       where: { id: numericId },
-      select: {
-        applicationStatus: true,
-        catalog: {
-          select: { id: true, defaultDiscountPercent: true, status: true },
-        },
-      },
+      select: { applicationStatus: true, catalogId: true },
     });
 
-    if (
-      !customer ||
-      customer.applicationStatus !== "ACCEPTED" ||
-      !customer.catalog ||
-      (customer.catalog as any).status !== "active"
-    ) {
+    if (!customer || customer.applicationStatus !== "ACCEPTED") {
       return json({ discounts: [] });
     }
 
-    const catalog = customer.catalog as any;
+    // Resolve all catalog IDs: junction table first, legacy FK fallback
+    const junctionRows = await db.$queryRaw<{ catalogId: number }[]>`
+      SELECT "catalogId" FROM customer_catalogs WHERE "customerId" = ${numericId}
+    `;
+    let catalogIds = junctionRows.map((r) => Number(r.catalogId));
+    if (catalogIds.length === 0 && customer.catalogId) {
+      catalogIds = [customer.catalogId];
+    }
 
-    // Extract variant IDs from the cart — only load these from DB, not the full catalog
-    const variantIds: string[] = [];
+    if (!catalogIds.length) return json({ discounts: [] });
+
+    const catalogs = await db.catalog.findMany({
+      where: { id: { in: catalogIds }, status: "active" },
+      select: {
+        id: true,
+        discountType: true,
+        defaultDiscountPercent: true,
+        fixedDiscountCents: true,
+        fixedPriceCents: true,
+        discountTitle: true,
+      },
+    }) as any[];
+
+    if (!catalogs.length) return json({ discounts: [] });
+
+    // Normalise cart variant IDs
+    const variantNumericIds: string[] = [];
     const variantGids: string[] = [];
     for (const item of cartItems) {
       const vid = String(item.variantId ?? "");
       if (!vid) continue;
       const numeric = vid.includes("/") ? (vid.split("/").pop() ?? "") : vid;
       if (NUMERIC_ID_RE.test(numeric)) {
-        variantIds.push(numeric);
-        variantGids.push(`gid://shopify/ProductVariant/${numeric}`);
+        if (!variantNumericIds.includes(numeric)) {
+          variantNumericIds.push(numeric);
+          variantGids.push(`gid://shopify/ProductVariant/${numeric}`);
+        }
       }
     }
 
-    if (!variantIds.length) return json({ discounts: [] });
+    if (!variantNumericIds.length) return json({ discounts: [] });
 
-    const items = await db.catalogItem.findMany({
+    // Load catalog items for only the cart variants — O(cart size), not O(catalog size)
+    const allItems = await db.catalogItem.findMany({
       where: {
-        catalogId: catalog.id,
-        variantId: { in: [...variantGids, ...variantIds] },
+        catalogId: { in: catalogIds },
+        variantId: { in: [...variantGids, ...variantNumericIds] },
       },
-      select: { variantId: true, productId: true, customPriceCents: true, customDiscountPercent: true },
-    });
+      select: { variantId: true, catalogId: true, customPriceCents: true, customDiscountPercent: true },
+    }) as any[];
 
-    const rawItems = (items as any[]).map((i) => ({
-      variantId: i.variantId as string | null,
-      productId: i.productId as string,
-      customPriceCents: i.customPriceCents !== null ? Number(i.customPriceCents) : null,
-      customDiscountPercent: i.customDiscountPercent !== null ? Number(i.customDiscountPercent) : null,
-    }));
+    const catalogMap = new Map(catalogs.map((c: any) => [Number(c.id), c]));
 
-    const discountMap = buildDiscountMapFromItems({
-      defaultDiscountPercent: catalog.defaultDiscountPercent,
-      items: rawItems,
-    });
+    // Build price map — lowest wholesale price across all catalogs wins
+    const priceMap = new Map<string, { wholesalePriceCents: number; label: string }>();
 
-    const discounts: Array<{
-      variantId: string;
-      wholesalePriceCents: number;
-      originalPriceCents: number;
-      discountPercent: number;
-    }> = [];
+    for (const item of allItems) {
+      const catalog = catalogMap.get(Number(item.catalogId));
+      if (!catalog) continue;
 
-    for (const item of cartItems) {
-      const variantId = String(item.variantId ?? "");
-      if (!variantId) continue;
+      const perItem    = Number(item.customDiscountPercent) || 0;
+      const base       = Number(item.customPriceCents) || 0;
+      const dtype      = String(catalog.discountType ?? "PERCENT");
 
-      const numId = variantId.includes("/") ? (variantId.split("/").pop() ?? variantId) : variantId;
-      const gidId = variantId.startsWith("gid://")
-        ? variantId
-        : `gid://shopify/ProductVariant/${variantId}`;
+      let wholesaleCents: number;
+      if (perItem > 0) {
+        // Explicit per-item wholesale price stored in cents
+        wholesaleCents = perItem;
+      } else if (dtype === "FIXED_AMOUNT") {
+        const off = Number(catalog.fixedDiscountCents) || 0;
+        if (off <= 0 || base <= 0) continue;
+        wholesaleCents = Math.max(1, base - off);
+      } else if (dtype === "FIXED_PRICE") {
+        const fp = Number(catalog.fixedPriceCents) || 0;
+        if (fp <= 0) continue;
+        wholesaleCents = fp;
+      } else {
+        // PERCENT — base price needed to compute; if missing, defaultPct covers it
+        const pct = Number(catalog.defaultDiscountPercent) || 0;
+        if (pct <= 0 || base <= 0) continue;
+        wholesaleCents = Math.round(base * (1 - pct / 100));
+      }
 
-      const entry = discountMap[variantId] ?? discountMap[gidId] ?? discountMap[numId];
-      if (!entry) continue;
+      if (wholesaleCents <= 0) continue;
 
-      discounts.push({
-        variantId: gidId,
-        wholesalePriceCents: entry.wholesalePriceCents,
-        originalPriceCents: entry.originalPriceCents,
-        discountPercent: entry.discountPercent,
-      });
+      const numId = (item.variantId as string ?? "").startsWith("gid://")
+        ? (item.variantId as string).split("/").pop()!
+        : String(item.variantId);
+
+      const existing = priceMap.get(numId);
+      if (!existing || wholesaleCents < existing.wholesalePriceCents) {
+        priceMap.set(numId, {
+          wholesalePriceCents: wholesaleCents,
+          label: catalog.discountTitle ?? "",
+        });
+      }
     }
 
-    console.log(`[discount-function] customerId=${numericId} | ${cartItems.length} cart items → ${discounts.length} discounts`);
-    return json({ discounts });
+    // Best catalog-level defaults for variants not covered by per-item entries
+    let defaultPct        = 0;
+    let defaultLabel      = "";
+    let fixedPrice        = 0;
+    let fixedPriceLabel   = "";
+
+    for (const c of catalogs) {
+      const dtype = String(c.discountType ?? "PERCENT");
+      if (dtype === "PERCENT") {
+        const pct = Number(c.defaultDiscountPercent) || 0;
+        if (pct > defaultPct) { defaultPct = pct; defaultLabel = c.discountTitle ?? ""; }
+      } else if (dtype === "FIXED_PRICE") {
+        const fp = Number(c.fixedPriceCents) || 0;
+        if (fp > 0 && (fixedPrice === 0 || fp < fixedPrice)) {
+          fixedPrice = fp; fixedPriceLabel = c.discountTitle ?? "";
+        }
+      }
+    }
+
+    // Build response
+    const discounts: Array<{ variantId: string; wholesalePriceCents: number; label?: string }> = [];
+    for (const item of cartItems) {
+      const vid = String(item.variantId ?? "");
+      if (!vid) continue;
+      const numeric = vid.includes("/") ? (vid.split("/").pop() ?? "") : vid;
+      const entry = priceMap.get(numeric);
+      if (entry) {
+        discounts.push({
+          variantId: `gid://shopify/ProductVariant/${numeric}`,
+          wholesalePriceCents: entry.wholesalePriceCents,
+          label: entry.label || undefined,
+        });
+      }
+    }
+
+    const response: Record<string, any> = { discounts };
+    if (defaultPct   > 0) { response.defaultPct   = defaultPct;   response.defaultLabel   = defaultLabel;   }
+    if (fixedPrice   > 0) { response.fixedPrice    = fixedPrice;   response.fixedPriceLabel = fixedPriceLabel; }
+
+    return json(response);
   } catch (err) {
     console.error("[discount-function] error:", err);
     return json({ discounts: [] }, { status: 500 });

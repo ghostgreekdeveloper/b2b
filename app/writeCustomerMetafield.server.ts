@@ -191,7 +191,32 @@ export async function writeCustomerDiscountMetafield(
   if (minimumOrderCents > 0)             payload.m   = minimumOrderCents;
   if (firstCatalog.minimumOrderMessage)  payload.msg = firstCatalog.minimumOrderMessage;
 
-  const value = JSON.stringify(payload);
+  // Safety cap: Shopify's JSON metafield limit is 64 KB (65,536 chars).
+  // If v{} is too large, drop all PERCENT items from it — `pct` covers them
+  // in both the run phase and the fetch+run path. Non-PERCENT items stay
+  // because FIXED_AMOUNT / FIXED_PRICE have no catalog-level fallback.
+  let value = JSON.stringify(payload);
+  if (value.length > 55000) {
+    const safeV: Record<string, number> = {};
+    const isPercentKey = new Set<string>();
+    for (const cat of catalogs) {
+      if (String(cat.discountType ?? "PERCENT") === "PERCENT") {
+        for (const item of (cat.items as any[])) {
+          const key = item.variantId ?? item.productId;
+          if (!key) continue;
+          const numId = key.startsWith("gid://shopify/ProductVariant/")
+            ? key.split("/").pop()!
+            : key;
+          isPercentKey.add(numId);
+        }
+      }
+    }
+    for (const [k, price] of Object.entries(v)) {
+      if (!isPercentKey.has(k)) safeV[k] = price;
+    }
+    payload.v = safeV;
+    value = JSON.stringify(payload);
+  }
   await _writeMetafield(admin, customerGid, value);
 }
 

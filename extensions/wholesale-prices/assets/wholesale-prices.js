@@ -670,7 +670,6 @@
   // ── Apply wholesale prices to all price elements on the page ─────────────────
   function applyAllWholesalePrices() {
     var roots   = document.querySelectorAll(T.priceRootSel);
-    var applied = 0;
     roots.forEach(function (priceRoot) {
       var variantId = getVariantIdFor(priceRoot);
       var entry     = variantId ? priceMap[variantId] : null;
@@ -721,10 +720,8 @@
 
       if (bestEntry && bestEntry.wholesalePriceCents > 0) {
         applyWholesaleToContainer(container, bestEntry);
-        applied++;
       }
     });
-    }
   }
 
   // ── Write cart attribute so discount function can identify the customer ───────
