@@ -268,6 +268,17 @@
           globalDefaultPctDisplay = data.defaultPctPriceDisplay || 'REPLACED';
         }
 
+        // ── DIAGNOSTIC: log everything the proxy returned ────────────────────
+        console.log('[B2B] proxy raw response:', JSON.stringify({
+          products:     (data.products || []).length,
+          defaultPct:   data.defaultPct,
+          fixedOff:     data.fixedOff,
+          fixedPrice:   data.fixedPrice,
+          priceDisplay: data.priceDisplay,
+          minimumOrder: data.minimumOrderCents,
+          keys:         Object.keys(data),
+        }));
+
         if (Array.isArray(data.products)) {
           var added = 0;
           data.products.forEach(function (p) {
@@ -278,7 +289,7 @@
             priceMap[numId] = p;
             added++;
           });
-          console.log('[B2B] added', added, 'price entries | total in map:', Object.keys(priceMap).length, '| fixedOff:', globalFixedOff, '| fixedPrice:', globalFixedPrice);
+          console.log('[B2B] added', added, 'price entries | total in map:', Object.keys(priceMap).length, '| fixedOff:', globalFixedOff, '| fixedPrice:', globalFixedPrice, '| defaultPct:', globalDefaultPct);
         }
 
         revealPrices();
@@ -727,6 +738,19 @@
     });
     if (roots.length > 0) {
       console.log('[B2B] applied ' + applied + '/' + roots.length + ' prices | theme=' + themeName);
+      if (applied === 0 && roots.length > 0) {
+        // Sample the first container to diagnose why nothing was applied
+        var sample = roots[0];
+        var sampleContainer = getContainer(sample);
+        var sampleVid = getVariantIdFor(sample);
+        var sampleDomPrice = sampleContainer ? readCurrentPriceCents(sampleContainer) : 0;
+        console.warn('[B2B] DIAGNOSTIC — no prices applied. globalDefaultPct=' + globalDefaultPct
+          + ' | sampleVariantId=' + sampleVid
+          + ' | sampleDomPriceCents=' + sampleDomPrice
+          + ' | priceRootSel=' + T.priceRootSel
+          + ' | regularAmtSel=' + T.regularAmtSel
+          + ' | inPriceMap=' + (sampleVid ? !!priceMap[sampleVid] : 'n/a'));
+      }
     }
   }
 
