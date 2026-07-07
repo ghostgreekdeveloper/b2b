@@ -285,7 +285,33 @@ export const action = async ({ params, request }: ActionFunctionArgs) => {
 
       for (const seg of segments) {
         const cond = seg.customercondition ?? "";
-        if (cond.startsWith("domain:") || cond.startsWith("customers:") || cond.startsWith("shopify_segment:")) continue;
+
+        if (cond.startsWith("customers:")) {
+          const ids = cond.slice(10).split(",").filter(Boolean);
+          if (!ids.includes(numericId)) continue;
+          const cats = await db.catalog.findMany({ where: { segmentId: seg.id, status: "active", shopDomain: shop }, select: { id: true } });
+          cats.forEach((c: any) => { if (!assignedIds.includes(c.id)) assignedIds.push(c.id); });
+          continue;
+        }
+
+        if (cond.startsWith("shopify_segment:")) {
+          const segGid = cond.slice(16);
+          try {
+            const res = await admin.graphql(
+              `query($segId: ID!) { customerSegmentMembers(segmentId: $segId, first: 250) { nodes { id } } }`,
+              { variables: { segId: segGid } }
+            );
+            const d = await res.json();
+            const members: string[] = (d?.data?.customerSegmentMembers?.nodes ?? []).map((n: any) => n.id);
+            if (!members.includes(customerGid)) continue;
+            const cats = await db.catalog.findMany({ where: { segmentId: seg.id, status: "active", shopDomain: shop }, select: { id: true } });
+            cats.forEach((c: any) => { if (!assignedIds.includes(c.id)) assignedIds.push(c.id); });
+          } catch { /* skip on API error */ }
+          continue;
+        }
+
+        if (cond.startsWith("domain:")) continue;
+
         const tag = cond.startsWith("tag:") ? cond.slice(4) : cond;
         if (!tag) continue;
 
@@ -295,7 +321,6 @@ export const action = async ({ params, request }: ActionFunctionArgs) => {
         });
         if (!cats.length) continue;
 
-        // Push tag to Shopify if customer doesn't have it yet
         if (!existingTags.includes(tag) && !tagsToAdd.includes(tag)) tagsToAdd.push(tag);
         cats.forEach((c: any) => { if (!assignedIds.includes(c.id)) assignedIds.push(c.id); });
       }

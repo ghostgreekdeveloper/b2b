@@ -282,22 +282,6 @@ export const loader = async ({ request }: any) => {
 
   const responseProducts = Array.from(productMap.values());
 
-  // ── Diagnostic log — visible in Docker / server logs ─────────────────────────
-  console.log(
-    `[B2B proxy] cust=${loggedInCustomerId} catalogs=${JSON.stringify(catalogIds)}` +
-    ` products=${responseProducts.length} defaultPct=${globalDefaultPct} fixedOff=${globalFixedOff} fixedPrice=${globalFixedPrice}`
-  );
-  if (responseProducts.length === 0 && globalDefaultPct === 0 && globalFixedOff === 0 && globalFixedPrice === 0) {
-    for (let ci = 0; ci < catalogEntries.length; ci++) {
-      const e = catalogEntries[ci];
-      if (!e) { console.log(`[B2B proxy]   catalog[${catalogIds[ci]}] = null/inactive`); continue; }
-      console.log(
-        `[B2B proxy]   catalog[${catalogIds[ci]}]` +
-        ` type=${e.discountType} defaultPct=${e.defaultDiscountPercent} fixedOff=${e.fixedDiscountCents} fixedPrice=${e.fixedPriceCents} items=${e.itemMap.size}`
-      );
-    }
-  }
-
   return json({
     products:            responseProducts,
     minimumOrderCents,

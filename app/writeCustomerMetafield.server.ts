@@ -150,6 +150,14 @@ export async function writeCustomerDiscountMetafield(
 
       if (price <= 0) continue;
 
+      // For PERCENT catalogs: skip entries where the per-item price is identical
+      // to what the default pct would produce — the function applies pct to those
+      // variants anyway, so storing them in v{} would only bloat the metafield.
+      if (discountType === "PERCENT" && perItem > 0 && base > 0) {
+        const catPct = Number(catalog.defaultDiscountPercent) || 0;
+        if (catPct > 0 && price === Math.round(base * (1 - catPct / 100))) continue;
+      }
+
       let numId: string;
       if (key.startsWith("gid://shopify/ProductVariant/")) {
         numId = key.split("/").pop()!;
@@ -184,13 +192,7 @@ export async function writeCustomerDiscountMetafield(
   if (firstCatalog.minimumOrderMessage)  payload.msg = firstCatalog.minimumOrderMessage;
 
   const value = JSON.stringify(payload);
-  console.log(
-    `[B2B] writing metafield → ${customerGid} | catalogIds=${JSON.stringify(catalogIds)}` +
-    ` | catalogs=${catalogs.map((c: any) => `${c.id}(pct=${c.defaultDiscountPercent},items=${c.items.length})`).join(",")}` +
-    ` | defaultPct=${defaultPct} | explicitPrices=${Object.keys(v).length} | payload=${value}`
-  );
   await _writeMetafield(admin, customerGid, value);
-  console.log(`[B2B] metafield written OK → ${customerGid}`);
 }
 
 export async function clearCustomerDiscountMetafield(

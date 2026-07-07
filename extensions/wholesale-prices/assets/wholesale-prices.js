@@ -268,14 +268,6 @@
           globalDefaultPctDisplay = data.defaultPctPriceDisplay || 'REPLACED';
         }
 
-        // ── Diagnostic: log full proxy response so we can see what came back ────
-        console.log('[B2B] proxy response keys:', Object.keys(data).join(','),
-          '| products:', (data.products || []).length,
-          '| defaultPct:', data.defaultPct,
-          '| fixedOff:', data.fixedOff,
-          '| fixedPrice:', data.fixedPrice
-        );
-
         if (Array.isArray(data.products)) {
           var added = 0;
           data.products.forEach(function (p) {
@@ -286,7 +278,6 @@
             priceMap[numId] = p;
             added++;
           });
-          console.log('[B2B] added', added, 'price entries | total in map:', Object.keys(priceMap).length, '| fixedOff:', globalFixedOff, '| fixedPrice:', globalFixedPrice, '| defaultPct:', globalDefaultPct);
         }
 
         revealPrices();
@@ -733,8 +724,6 @@
         applied++;
       }
     });
-    if (roots.length > 0) {
-      console.log('[B2B] applied ' + applied + '/' + roots.length + ' prices | theme=' + themeName);
     }
   }
 
